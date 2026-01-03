@@ -1,0 +1,82 @@
+# Task Configuration
+# This file contains settings for workflow tasks
+
+workflow:
+  # Timeout settings (seconds)
+  default_timeout: 300
+  llm_timeout: 60
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay: 1
+  
+  # Approval settings
+  approval_threshold: 10000.0
+  auto_approve_below: 1000.0
+  
+  # Email settings
+  quote_validity_days: 30
+  default_delivery_days: 14
+  
+nodes:
+  ingest_email:
+    timeout: 30
+    
+  understand_lead:
+    timeout: 60
+    
+  request_clarification:
+    timeout: 60
+    
+  check_feasibility:
+    timeout: 30
+    
+  calculate_pricing:
+    timeout: 60
+    
+  check_approval:
+    timeout: 10
+    
+  request_approval:
+    timeout: 30
+    
+  send_quote:
+    timeout: 60
+    
+  process_reply:
+    timeout: 60
+    
+  place_order:
+    timeout: 30
+    
+  send_confirmation:
+    timeout: 60
+    
+  handle_rejection:
+    timeout: 60
+
+products:
+  widget:
+    base_price: 5.00
+    min_quantity: 10
+    max_quantity: 10000
+    min_timeline_days: 3
+    
+  gadget:
+    base_price: 15.00
+    min_quantity: 5
+    max_quantity: 5000
+    min_timeline_days: 5
+    
+  component:
+    base_price: 2.50
+    min_quantity: 100
+    max_quantity: 50000
+    min_timeline_days: 7
+    
+  assembly:
+    base_price: 75.00
+    min_quantity: 1
+    max_quantity: 1000
+    min_timeline_days: 14
+

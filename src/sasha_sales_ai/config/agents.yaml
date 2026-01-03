@@ -1,0 +1,31 @@
+# Agent Configuration
+# This file contains prompts and settings for LangChain agents
+
+lead_analyzer:
+  name: "Lead Analyzer"
+  description: "Analyzes incoming emails to extract requirements and classify intent"
+  model: "gpt-4o-mini"
+  temperature: 0
+  max_tokens: 2000
+  
+email_writer:
+  name: "Email Writer"
+  description: "Generates professional sales emails"
+  model: "gpt-4o-mini"
+  temperature: 0.3
+  max_tokens: 3000
+  
+pricing_expert:
+  name: "Pricing Expert"
+  description: "Explains pricing and handles negotiations"
+  model: "gpt-4o-mini"
+  temperature: 0.2
+  max_tokens: 2000
+
+intent_classifier:
+  name: "Intent Classifier"
+  description: "Classifies customer reply intent"
+  model: "gpt-4o-mini"
+  temperature: 0
+  max_tokens: 500
+
