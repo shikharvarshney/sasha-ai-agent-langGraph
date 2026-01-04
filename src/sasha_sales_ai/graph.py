@@ -20,6 +20,7 @@ from .nodes import (
     place_order,
     send_confirmation,
     handle_rejection,
+    handle_error,
 )
 
 logger = logging.getLogger("sasha_sales_ai.graph")
@@ -27,10 +28,11 @@ logger = logging.getLogger("sasha_sales_ai.graph")
 
 def route_after_understanding(
     state: FlowState,
-) -> Literal["process_reply", "request_clarification", "check_feasibility"]:
+) -> Literal["process_reply", "request_clarification", "check_feasibility", "handle_error"]:
     """Route after understanding the lead.
     
     Determines the next step based on:
+    - Error status (must stop on error)
     - Email type (new vs reply)
     - Missing information
     - Customer intent
@@ -41,9 +43,15 @@ def route_after_understanding(
     Returns:
         Next node name
     """
+    status = state.get("status", "")
     email_type = state.get("email_type", "new")
     missing_fields = state.get("missing_fields", [])
     customer_intent = state.get("customer_intent", "")
+    
+    # CRITICAL: If status is ERROR, stop immediately - do not route to any node
+    if status == FlowStatus.ERROR:
+        logger.error(f"Error detected in understanding - stopping flow")
+        return "handle_error"
     
     # If it's a reply, process it
     if email_type == "reply":
@@ -113,8 +121,16 @@ def route_after_approval_decision(
 
 def route_after_reply(
     state: FlowState,
-) -> Literal["place_order", "handle_rejection", "check_feasibility", "request_clarification"]:
+) -> Literal["place_order", "handle_rejection", "check_feasibility", "request_clarification", "handle_error"]:
     """Route after processing customer reply.
+    
+    CRITICAL DISTINCTION:
+    - ERROR: Stop immediately
+    - PROVIDING_INFO: Customer giving missing info -> check if we have enough, then feasibility
+    - CONFIRMATION: Customer explicitly says yes -> place order (ONLY if quote was sent)
+    - REJECTION: Customer declines -> handle rejection
+    - MODIFICATION: Customer wants changes -> re-check feasibility
+    - QUESTION/CLARIFICATION: Need to respond -> request clarification
     
     Args:
         state: Current flow state
@@ -122,16 +138,41 @@ def route_after_reply(
     Returns:
         Next node name
     """
+    status = state.get("status", "")
     customer_intent = state.get("customer_intent", "")
+    customer_confirmed = state.get("customer_confirmed", False)
+    missing_fields = state.get("missing_fields", [])
+    feasibility_checked = state.get("feasibility_checked", False)
+    quote_sent = state.get("quote_sent", False)
     
-    if customer_intent == CustomerIntent.CONFIRMATION:
+    # CRITICAL: If status is ERROR, stop immediately
+    if status == FlowStatus.ERROR:
+        logger.error(f"Error detected in reply processing - stopping flow")
+        return "handle_error"
+    
+    # If customer explicitly confirmed (said yes, proceed, etc.)
+    if customer_confirmed or customer_intent == CustomerIntent.CONFIRMATION or customer_intent == "confirmation":
+        # CRITICAL: Only allow order if quote was sent (which means feasibility passed)
+        if not quote_sent:
+            logger.warning(f"Customer tried to confirm but no quote was sent - requesting clarification")
+            return "request_clarification"
+        
         return "place_order"
-    elif customer_intent == CustomerIntent.REJECTION:
+    
+    # If customer rejected
+    if customer_intent == CustomerIntent.REJECTION or customer_intent == "rejection":
         return "handle_rejection"
-    elif customer_intent == CustomerIntent.MODIFICATION:
+    
+    # If customer is providing info or wants modifications
+    if customer_intent in [CustomerIntent.PROVIDING_INFO, "providing_info", CustomerIntent.MODIFICATION, "modification"]:
+        # Check if we still have missing info
+        if missing_fields:
+            return "request_clarification"
+        # Otherwise proceed to feasibility check with new info
         return "check_feasibility"
-    else:  # question, clarification, or unknown
-        return "request_clarification"
+    
+    # For questions or clarifications, respond
+    return "request_clarification"
 
 
 def should_end(state: FlowState) -> bool:
@@ -181,6 +222,7 @@ def create_sales_graph(checkpointer=None):
     graph.add_node("place_order", place_order)
     graph.add_node("send_confirmation", send_confirmation)
     graph.add_node("handle_rejection", handle_rejection)
+    graph.add_node("handle_error", handle_error)
     
     # Entry point
     graph.add_edge(START, "ingest_email")
@@ -194,6 +236,7 @@ def create_sales_graph(checkpointer=None):
             "process_reply": "process_reply",
             "request_clarification": "request_clarification",
             "check_feasibility": "check_feasibility",
+            "handle_error": "handle_error",
         },
     )
     
@@ -238,6 +281,7 @@ def create_sales_graph(checkpointer=None):
             "handle_rejection": "handle_rejection",
             "check_feasibility": "check_feasibility",
             "request_clarification": "request_clarification",
+            "handle_error": "handle_error",
         },
     )
     
@@ -247,6 +291,7 @@ def create_sales_graph(checkpointer=None):
     # Terminal nodes
     graph.add_edge("send_confirmation", END)
     graph.add_edge("handle_rejection", END)
+    graph.add_edge("handle_error", END)
     
     # Use default memory checkpointer if none provided
     if checkpointer is None:
@@ -290,6 +335,7 @@ def create_reply_entry_graph(checkpointer=None):
     graph.add_node("place_order", place_order)
     graph.add_node("send_confirmation", send_confirmation)
     graph.add_node("handle_rejection", handle_rejection)
+    graph.add_node("handle_error", handle_error)
     
     # Entry through ingest (which will detect it's a reply)
     graph.add_edge(START, "ingest_email")
@@ -304,11 +350,13 @@ def create_reply_entry_graph(checkpointer=None):
             "handle_rejection": "handle_rejection",
             "check_feasibility": "check_feasibility",
             "request_clarification": "request_clarification",
+            "handle_error": "handle_error",
         },
     )
     
     # Add remaining edges (same as main graph)
     graph.add_edge("request_clarification", END)
+    graph.add_edge("handle_error", END)
     
     graph.add_conditional_edges(
         "check_feasibility",

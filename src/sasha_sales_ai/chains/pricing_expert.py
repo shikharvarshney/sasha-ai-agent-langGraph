@@ -11,13 +11,28 @@ from ..config import get_settings
 
 logger = logging.getLogger("sasha_sales_ai.chains.pricing_expert")
 
-PRICING_EXPERT_SYSTEM_PROMPT = """You are a pricing expert for a manufacturing company. 
+PRICING_EXPERT_SYSTEM_PROMPT = """You are a pricing expert for a promotional products company.
 Your role is to explain pricing to customers in a clear, transparent, and professional manner.
+
+Our Product Catalog:
+- T-Shirts: Base $10.00 (min 10, max 10000 units)
+- Polos: Base $15.00 (min 10, max 10000 units)
+- Hoodies: Base $25.00 (min 10, max 5000 units)
+- Caps: Base $8.00 (min 10, max 10000 units)
+- Mugs: Base $12.00 (min 10, max 5000 units)
+- Tote Bags: Base $7.00 (min 10, max 10000 units)
+- Jackets: Base $40.00 (min 10, max 1000 units)
+
+Customization Options:
+- Logo printing: +$2.00/unit
+- Embroidery: +$4.00/unit  
+- Screen printing: +$1.50/unit
+- DTG (Direct to Garment): +$3.00/unit
 
 You should:
 - Break down costs clearly
-- Explain any discounts applied
-- Justify any surcharges
+- Explain any volume discounts applied
+- Justify any surcharges (rush fees, etc.)
 - Highlight value propositions
 - Be transparent about pricing structure
 
@@ -38,10 +53,10 @@ Total Amount: ${total_amount}
 
 Generate a customer-friendly explanation that:
 1. Summarizes the order
-2. Explains each line item
-3. Highlights any discounts
-4. Explains any surcharges (like rush fees)
-5. Provides the final total
+2. Explains each line item (base price, customization, setup fees)
+3. Highlights any volume discounts (5% at 100+, 10% at 500+, 15% at 1000+)
+4. Explains any surcharges (like rush fees for orders under 7 days)
+5. Provides the final total clearly
 
 Return as JSON:
 {{
@@ -60,11 +75,14 @@ Original Quote:
 Customer's Request:
 {customer_request}
 
-Our Policies:
-- Volume discounts are automatic (5% at 100+, 10% at 500+, 15% at 1000+)
-- Rush fees are based on timeline requirements
+Our Pricing Policies:
+- Volume discounts are automatic:
+  * 5% discount at 100+ units
+  * 10% discount at 500+ units
+  * 15% discount at 1000+ units
+- Rush fees apply for orders under 7 days
 - Customizations have fixed per-unit costs
-- Maximum discount authority: 20%
+- Maximum negotiable discount: 20% (for very large orders only)
 
 Generate a response addressing their pricing concerns.
 
@@ -206,15 +224,15 @@ def format_pricing_breakdown(pricing_data: dict[str, Any]) -> str:
     
     # Discounts
     if pricing_data.get("discounts"):
-        lines.append("\nDiscounts:")
+        lines.append("\nDiscounts Applied:")
         for discount in pricing_data["discounts"]:
             lines.append(
-                f"  - {discount['description']}: ${discount['amount']:,.2f}"
+                f"  - {discount['description']}: -${discount['amount']:,.2f}"
             )
     
     # Surcharges
     if pricing_data.get("surcharges"):
-        lines.append("\nSurcharges:")
+        lines.append("\nAdditional Charges:")
         for surcharge in pricing_data["surcharges"]:
             lines.append(
                 f"  - {surcharge['description']}: +${surcharge['amount']:,.2f}"
@@ -238,7 +256,7 @@ def format_pricing_breakdown(pricing_data: dict[str, Any]) -> str:
             f"Rush Delivery: ${pricing_data.get('rush_surcharge', 0):,.2f}"
         )
     
-    lines.append(f"\nGRAND TOTAL: ${pricing_data.get('grand_total', 0):,.2f}")
+    lines.append(f"\n{'='*40}")
+    lines.append(f"GRAND TOTAL: ${pricing_data.get('grand_total', 0):,.2f}")
     
     return "\n".join(lines)
-

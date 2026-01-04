@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     state_storage_path: str = Field(
         default="./state_storage", alias="STATE_STORAGE_PATH"
     )
+    
+    # Redis Configuration
+    redis_url: str = Field(
+        default="redis://localhost:6379", alias="REDIS_URL"
+    )
+    redis_key_prefix: str = Field(
+        default="sasha:", alias="REDIS_KEY_PREFIX"
+    )
 
     # API Configuration
     api_host: str = Field(default="0.0.0.0")

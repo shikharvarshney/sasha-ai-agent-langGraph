@@ -4,6 +4,8 @@ import logging
 from typing import Optional, Any
 from datetime import datetime
 
+from ..config import get_settings
+
 logger = logging.getLogger("sasha_sales_ai.utils.approval")
 
 # In-memory approval storage (would be a database in production)
@@ -13,13 +15,18 @@ _pending_approvals: dict[str, dict[str, Any]] = {}
 class ApprovalHandler:
     """Handler for managing approval requests and responses"""
     
-    def __init__(self, approval_threshold: float = 10000.0):
+    def __init__(self, approval_threshold: Optional[float] = None):
         """Initialize the approval handler.
         
         Args:
-            approval_threshold: Amount above which approval is required
+            approval_threshold: Amount above which approval is required.
+                               If not provided, uses settings.approval_threshold.
         """
-        self.approval_threshold = approval_threshold
+        if approval_threshold is None:
+            settings = get_settings()
+            self.approval_threshold = settings.approval_threshold
+        else:
+            self.approval_threshold = approval_threshold
     
     def needs_approval(self, total_amount: float, lead_id: str) -> bool:
         """Check if an order requires approval.

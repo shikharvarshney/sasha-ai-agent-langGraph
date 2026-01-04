@@ -8,6 +8,7 @@ from ..state import FlowState, FlowStatus
 from ..tools.pricing_tool import calculate_price
 from ..chains.pricing_expert import generate_pricing_explanation, format_pricing_breakdown
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after
 
 logger = logging.getLogger("sasha_sales_ai.nodes.pricing")
 
@@ -28,6 +29,9 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("calculate_pricing", state)
+    
     with get_tracing_context(
         name="calculate_pricing",
         tags=["node", "pricing", lead_id],
@@ -38,11 +42,18 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
         try:
             requirements = state.get("requirements", {})
             
-            # Extract product details
-            product_type = requirements.get("product_type", "widget")
-            quantity = requirements.get("quantity", 0)
-            customizations = requirements.get("customizations")
-            timeline = requirements.get("timeline")
+            # Handle nested requirements structure (requirements.requirements.*)
+            nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
+            
+            # Extract product details - check both top-level and nested
+            raw_product_type = requirements.get("product_type") or nested_req.get("product_type")
+            product_type = raw_product_type if raw_product_type else "t-shirt"  # Default to t-shirt, not widget
+            
+            # Get quantity - check both top-level and nested
+            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+            
+            customizations = requirements.get("customizations") or nested_req.get("customizations")
+            timeline = requirements.get("timeline") or nested_req.get("timeline")
             
             # Parse quantity
             if isinstance(quantity, str):
@@ -66,6 +77,11 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
                 else:
                     timeline_days = int(timeline)
             
+            logger.info(
+                f"Pricing params: product={product_type}, qty={quantity}, "
+                f"timeline={timeline_days}, custom={customizations}"
+            )
+            
             # Calculate price
             price_result_str = calculate_price.invoke({
                 "product_type": product_type,
@@ -79,16 +95,20 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
             # Check for errors
             if "error" in price_data:
                 logger.error(f"Pricing error for {lead_id}: {price_data['error']}")
-                return {
+                result = {
                     "status": FlowStatus.ERROR,
                     "error_message": price_data["error"],
                     "error_node": "calculate_pricing",
                 }
+                log_state_after("calculate_pricing", state, result)
+                return result
             
             total_amount = price_data.get("grand_total", 0)
             
             # Format pricing breakdown
             pricing_breakdown = format_pricing_breakdown(price_data)
+            
+            logger.info(f"Pricing breakdown for {lead_id}:\n{pricing_breakdown}")
             
             # Generate explanation
             explanation_result = generate_pricing_explanation(
@@ -107,7 +127,7 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
             
             logger.info(f"Pricing calculated for {lead_id}: ${total_amount:,.2f}")
             
-            return {
+            result = {
                 "price_quote": price_data,
                 "pricing_explanation": pricing_explanation,
                 "total_amount": total_amount,
@@ -115,11 +135,15 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
                 "current_node": "calculate_pricing",
             }
             
+            log_state_after("calculate_pricing", state, result)
+            return result
+            
         except Exception as e:
             logger.error(f"Error calculating pricing for {lead_id}: {e}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": str(e),
                 "error_node": "calculate_pricing",
             }
-
+            log_state_after("calculate_pricing", state, result)
+            return result

@@ -5,8 +5,9 @@ import logging
 from typing import Any
 
 from ..state import FlowState, FlowStatus
-from ..tools.feasibility_tool import check_product_feasibility
+from ..tools.feasibility_tool import check_feasibility as check_feasibility_tool
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after
 
 logger = logging.getLogger("sasha_sales_ai.nodes.feasibility")
 
@@ -16,7 +17,7 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
     
     This node:
     1. Extracts product requirements from state
-    2. Runs feasibility check against product catalog
+    2. Runs feasibility check against business rules
     3. Captures alternatives if not feasible
     
     Args:
@@ -26,6 +27,9 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
         Updated state fields
     """
     lead_id = state.get("lead_id", "unknown")
+    
+    # Log state before execution
+    log_state_before("check_feasibility", state)
     
     with get_tracing_context(
         name="check_feasibility",
@@ -37,12 +41,14 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
         try:
             requirements = state.get("requirements", {})
             
-            # Extract product details
-            product_type = requirements.get("product_type", "widget")
-            quantity = requirements.get("quantity", 0)
-            timeline = requirements.get("timeline")
-            customizations = requirements.get("customizations")
-            material = requirements.get("material")
+            # Handle nested requirements structure (requirements.requirements.*)
+            nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
+            
+            # Extract product details - check both top-level and nested
+            product_type = requirements.get("product_type") or nested_req.get("product_type") or "t-shirt"
+            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+            timeline = requirements.get("timeline") or nested_req.get("timeline")
+            customizations = requirements.get("customizations") or nested_req.get("customizations")
             
             # Parse quantity if it's a string
             if isinstance(quantity, str):
@@ -67,13 +73,17 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
                 else:
                     timeline_days = int(timeline)
             
-            # Run feasibility check
-            result_str = check_product_feasibility.invoke({
+            logger.info(
+                f"Feasibility check params: product={product_type}, "
+                f"qty={quantity}, timeline={timeline_days}, custom={customizations}"
+            )
+            
+            # Run feasibility check using the tool
+            result_str = check_feasibility_tool.invoke({
                 "product_type": product_type,
                 "quantity": quantity,
                 "timeline_days": timeline_days,
                 "customizations": customizations,
-                "material": material,
             })
             
             result = json.loads(result_str)
@@ -81,10 +91,15 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
             is_feasible = result.get("is_feasible", False)
             reason = result.get("reason", "")
             alternatives = result.get("alternatives", "")
+            warnings = result.get("warnings", [])
+            
+            # Log warnings if any
+            if warnings:
+                logger.warning(f"Feasibility warnings for {lead_id}: {warnings}")
             
             logger.info(f"Feasibility for {lead_id}: {is_feasible} - {reason}")
             
-            return {
+            node_result = {
                 "is_feasible": is_feasible,
                 "feasibility_reason": reason,
                 "alternatives": alternatives,
@@ -93,9 +108,12 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
                 "current_node": "check_feasibility",
             }
             
+            log_state_after("check_feasibility", state, node_result)
+            return node_result
+            
         except Exception as e:
             logger.error(f"Error checking feasibility for {lead_id}: {e}")
-            return {
+            result = {
                 "is_feasible": False,
                 "feasibility_reason": f"Error during feasibility check: {str(e)}",
                 "alternatives": "",
@@ -104,4 +122,5 @@ def check_feasibility(state: FlowState) -> dict[str, Any]:
                 "error_message": str(e),
                 "error_node": "check_feasibility",
             }
-
+            log_state_after("check_feasibility", state, result)
+            return result

@@ -24,9 +24,10 @@ class FlowState(TypedDict, total=False):
 
     # Analysis results
     requirements: dict[str, Any]
-    missing_fields: list[str]
-    customer_intent: str  # new_inquiry, clarification, confirmation, 
+    missing_fields: list[dict[str, str] | str]  # Can be dicts with field+description or strings
+    customer_intent: str  # new_inquiry, providing_info, clarification, confirmation, 
                           # rejection, modification, question
+    has_customization_request: bool  # Whether logo/print/design was requested
 
     # Feasibility
     is_feasible: Optional[bool]
@@ -79,8 +80,9 @@ class FlowStatus:
 class CustomerIntent:
     """Constants for customer intent classification"""
     NEW_INQUIRY = "new_inquiry"
-    CLARIFICATION = "clarification"
-    CONFIRMATION = "confirmation"
+    PROVIDING_INFO = "providing_info"  # Customer providing missing info (NOT confirmation)
+    CLARIFICATION = "clarification"    # Legacy - same as providing_info
+    CONFIRMATION = "confirmation"      # Customer EXPLICITLY confirms order/quote
     REJECTION = "rejection"
     MODIFICATION = "modification"
     QUESTION = "question"
@@ -116,6 +118,7 @@ def create_initial_state(
         requirements={},
         missing_fields=[],
         customer_intent="",
+        has_customization_request=False,
         is_feasible=None,
         feasibility_reason="",
         alternatives="",
@@ -135,4 +138,3 @@ def create_initial_state(
         error_message="",
         error_node="",
     )
-

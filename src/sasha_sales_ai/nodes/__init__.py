@@ -11,6 +11,7 @@ from .reply import process_reply
 from .order import place_order
 from .confirmation import send_confirmation
 from .rejection import handle_rejection
+from .error_handler import handle_error
 
 __all__ = [
     "ingest_email",
@@ -25,4 +26,5 @@ __all__ = [
     "place_order",
     "send_confirmation",
     "handle_rejection",
+    "handle_error",
 ]

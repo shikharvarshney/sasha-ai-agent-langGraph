@@ -9,6 +9,7 @@ from ..chains.pricing_expert import format_pricing_breakdown
 from ..tools.email_tool import send_email
 from ..storage.rag_storage import get_rag_storage
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after, log_outgoing_email
 
 logger = logging.getLogger("sasha_sales_ai.nodes.quote")
 
@@ -30,6 +31,9 @@ def send_quote(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("send_quote", state)
+    
     with get_tracing_context(
         name="send_quote",
         tags=["node", "quote", lead_id],
@@ -42,22 +46,35 @@ def send_quote(state: FlowState) -> dict[str, Any]:
             price_quote = state.get("price_quote", {})
             total_amount = state.get("total_amount", 0)
             
-            customer_name = requirements.get("customer_name", "")
+            # Handle nested requirements structure
+            nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
+            
+            customer_name = requirements.get("customer_name") or nested_req.get("customer_name") or ""
             customer_email = state.get("email_from", "")
+            
+            # Build order summary - check both top-level and nested
+            product_type = requirements.get("product_type") or nested_req.get("product_type") or "product"
+            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+            customizations = requirements.get("customizations") or nested_req.get("customizations") or ""
+            
+            order_summary = f"{quantity} x {product_type}"
+            if customizations:
+                order_summary += f" with {customizations}"
             
             # Format quote details
             quote_details = format_pricing_breakdown(price_quote)
             
             # Get pricing explanation for additional context
-            additional_context = state.get("pricing_explanation", "")
+            pricing_breakdown = state.get("pricing_explanation", quote_details)
             
             # Generate quote email
             email_result = write_quote_email(
                 customer_name=customer_name,
                 customer_email=customer_email,
+                order_summary=order_summary,
                 quote_details=quote_details,
                 total_amount=total_amount,
-                additional_context=additional_context,
+                pricing_breakdown=pricing_breakdown,
             )
             
             subject = email_result.get(
@@ -65,6 +82,9 @@ def send_quote(state: FlowState) -> dict[str, Any]:
                 f"Your Quote Request - ${total_amount:,.2f}"
             )
             body = email_result.get("body", "")
+            
+            # Log the outgoing email
+            log_outgoing_email(lead_id, customer_email, subject, body, "quote")
             
             # Send the email
             send_result = send_email.invoke({
@@ -87,7 +107,7 @@ def send_quote(state: FlowState) -> dict[str, Any]:
                 },
             )
             
-            return {
+            result = {
                 "status": FlowStatus.QUOTE_SENT,
                 "quote_sent": True,
                 "outgoing_email_subject": subject,
@@ -95,11 +115,15 @@ def send_quote(state: FlowState) -> dict[str, Any]:
                 "current_node": "send_quote",
             }
             
+            log_state_after("send_quote", state, result)
+            return result
+            
         except Exception as e:
             logger.error(f"Error sending quote for {lead_id}: {e}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": str(e),
                 "error_node": "send_quote",
             }
-
+            log_state_after("send_quote", state, result)
+            return result

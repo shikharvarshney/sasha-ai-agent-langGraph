@@ -6,6 +6,7 @@ from typing import Any
 from ..state import FlowState, FlowStatus
 from ..storage.rag_storage import get_rag_storage
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after, log_incoming_email
 
 logger = logging.getLogger("sasha_sales_ai.nodes.ingest")
 
@@ -26,6 +27,12 @@ def ingest_email(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("ingest_email", state)
+    
+    # Log the incoming customer email
+    log_incoming_email(state)
+    
     with get_tracing_context(
         name="ingest_email",
         tags=["node", "ingest", lead_id],
@@ -41,11 +48,13 @@ def ingest_email(state: FlowState) -> dict[str, Any]:
         
         if not email_from or not email_body:
             logger.error(f"Invalid email data for lead {lead_id}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": "Missing required email data (from or body)",
                 "error_node": "ingest_email",
             }
+            log_state_after("ingest_email", state, result)
+            return result
         
         # Store in RAG storage
         storage = get_rag_storage()
@@ -66,9 +75,13 @@ def ingest_email(state: FlowState) -> dict[str, Any]:
         
         logger.info(f"Email ingested for lead {lead_id}, type: {email_type}")
         
-        return {
+        result = {
             "status": FlowStatus.UNDERSTANDING,
             "thread_history": thread_history,
             "current_node": "ingest_email",
         }
-
+        
+        # Log state after execution
+        log_state_after("ingest_email", state, result)
+        
+        return result

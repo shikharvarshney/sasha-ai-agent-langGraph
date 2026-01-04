@@ -1,168 +1,218 @@
-"""Feasibility checking tool"""
+"""Feasibility check tool for validating order requirements."""
 
+import json
 import logging
-from typing import Optional
+from typing import Optional, Any
+
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("sasha_sales_ai.tools.feasibility")
 
-# Product catalog with capabilities
-PRODUCT_CATALOG = {
-    "widget": {
-        "min_quantity": 10,
-        "max_quantity": 10000,
-        "min_timeline_days": 3,
-        "customization_available": True,
-        "materials": ["plastic", "metal", "wood"],
-    },
-    "gadget": {
-        "min_quantity": 5,
-        "max_quantity": 5000,
-        "min_timeline_days": 5,
-        "customization_available": True,
-        "materials": ["plastic", "metal"],
-    },
-    "component": {
-        "min_quantity": 100,
-        "max_quantity": 50000,
-        "min_timeline_days": 7,
-        "customization_available": False,
-        "materials": ["metal", "composite"],
-    },
-    "assembly": {
-        "min_quantity": 1,
-        "max_quantity": 1000,
-        "min_timeline_days": 14,
-        "customization_available": True,
-        "materials": ["mixed"],
-    },
+
+# Business rules for feasibility checks
+FEASIBILITY_RULES = {
+    "min_quantity": 10,
+    "max_quantity": 10000,
+    "min_lead_time_days": 3,
+    "max_lead_time_days": 90,
+    "supported_products": [
+        "t-shirt", "tshirt", "t shirt",
+        "polo", "polo shirt",
+        "hoodie", "hooded sweatshirt",
+        "cap", "hat", "baseball cap",
+        "mug", "coffee mug",
+        "tote bag", "bag",
+        "jacket",
+    ],
+    "supported_customizations": [
+        "logo", "print", "printing", "printed",
+        "embroidery", "embroidered",
+        "screen print", "screen printed",
+        "dtg", "direct to garment",
+    ],
 }
 
 
+class FeasibilityResult(BaseModel):
+    """Result of feasibility check."""
+    is_feasible: bool
+    reason: str
+    alternatives: Optional[str] = None
+    warnings: list[str] = []
+
+
+def _format_result(result: FeasibilityResult) -> str:
+    """Format the result as JSON string."""
+    return json.dumps({
+        "is_feasible": result.is_feasible,
+        "reason": result.reason,
+        "alternatives": result.alternatives,
+        "warnings": result.warnings,
+    })
+
+
 @tool
-def check_product_feasibility(
-    product_type: str,
-    quantity: int,
+def check_feasibility(
+    product_type: Optional[str] = None,
+    quantity: Optional[int] = None,
     timeline_days: Optional[int] = None,
     customizations: Optional[str] = None,
-    material: Optional[str] = None,
 ) -> str:
-    """Check if a product order is feasible given the requirements.
+    """Check if a customer's order requirements are feasible based on business rules.
+    
+    This includes checking product availability, quantity limits, and timeline constraints.
+    Returns feasibility status, reason, and any alternatives if not feasible.
     
     Args:
-        product_type: Type of product (widget, gadget, component, assembly)
-        quantity: Number of units requested
-        timeline_days: Optional requested delivery timeline in days
-        customizations: Optional customization requirements
-        material: Optional material specification
+        product_type: Type of product requested (e.g., t-shirt, polo, hoodie)
+        quantity: Quantity requested
+        timeline_days: Requested delivery timeline in days
+        customizations: Requested customizations (e.g., logo, embroidery)
     
     Returns:
-        JSON string with feasibility result, reason, and any alternatives
+        JSON string with feasibility result including is_feasible, reason, alternatives, and warnings
     """
-    import json
+    logger.info(f"Checking feasibility: product={product_type}, qty={quantity}, days={timeline_days}")
     
-    logger.info(f"Checking feasibility: {product_type} x {quantity}")
+    warnings = []
     
-    result = {
-        "is_feasible": False,
-        "reason": "",
-        "alternatives": "",
-    }
+    # Check product type
+    if product_type:
+        product_lower = product_type.lower()
+        is_supported = any(
+            supported in product_lower 
+            for supported in FEASIBILITY_RULES["supported_products"]
+        )
+        if not is_supported:
+            return _format_result(FeasibilityResult(
+                is_feasible=False,
+                reason=f"Product type '{product_type}' is not in our catalog.",
+                alternatives="We offer: t-shirts, polos, hoodies, caps, mugs, tote bags, and jackets.",
+            ))
     
-    # Normalize product type
-    product_type_lower = product_type.lower().strip()
-    
-    # Check if product exists
-    if product_type_lower not in PRODUCT_CATALOG:
-        result["reason"] = f"Product type '{product_type}' is not in our catalog."
-        result["alternatives"] = f"Available products: {', '.join(PRODUCT_CATALOG.keys())}"
-        return json.dumps(result)
-    
-    product = PRODUCT_CATALOG[product_type_lower]
-    
-    # Check quantity limits
-    if quantity < product["min_quantity"]:
-        result["reason"] = f"Minimum order quantity for {product_type} is {product['min_quantity']} units."
-        result["alternatives"] = f"Consider ordering at least {product['min_quantity']} units."
-        return json.dumps(result)
-    
-    if quantity > product["max_quantity"]:
-        result["reason"] = f"Maximum order quantity for {product_type} is {product['max_quantity']} units per order."
-        result["alternatives"] = f"Consider splitting into multiple orders of {product['max_quantity']} units each."
-        return json.dumps(result)
+    # Check quantity
+    if quantity is not None:
+        if quantity < FEASIBILITY_RULES["min_quantity"]:
+            return _format_result(FeasibilityResult(
+                is_feasible=False,
+                reason=f"Minimum order quantity is {FEASIBILITY_RULES['min_quantity']} units.",
+                alternatives=f"Please consider ordering at least {FEASIBILITY_RULES['min_quantity']} units.",
+            ))
+        
+        if quantity > FEASIBILITY_RULES["max_quantity"]:
+            return _format_result(FeasibilityResult(
+                is_feasible=False,
+                reason=f"Maximum order quantity is {FEASIBILITY_RULES['max_quantity']} units per order.",
+                alternatives="For larger orders, please contact our enterprise team.",
+            ))
+        
+        # Warning for large orders
+        if quantity > 1000:
+            warnings.append("Large order - may require additional lead time.")
     
     # Check timeline
-    if timeline_days is not None and timeline_days < product["min_timeline_days"]:
-        result["reason"] = f"Minimum production time for {product_type} is {product['min_timeline_days']} days."
-        result["alternatives"] = f"We can deliver in {product['min_timeline_days']} days with rush processing (additional charges may apply)."
-        return json.dumps(result)
+    if timeline_days is not None:
+        if timeline_days < FEASIBILITY_RULES["min_lead_time_days"]:
+            return _format_result(FeasibilityResult(
+                is_feasible=False,
+                reason=f"Minimum lead time is {FEASIBILITY_RULES['min_lead_time_days']} days.",
+                alternatives=f"We can deliver in {FEASIBILITY_RULES['min_lead_time_days']} days with rush processing.",
+            ))
+        
+        if timeline_days > FEASIBILITY_RULES["max_lead_time_days"]:
+            warnings.append("Extended timeline - please confirm closer to desired date.")
     
-    # Check customization
-    if customizations and not product["customization_available"]:
-        result["reason"] = f"Customization is not available for {product_type}."
-        result["alternatives"] = "Consider our 'widget' or 'gadget' products which support customization."
-        return json.dumps(result)
-    
-    # Check material
-    if material:
-        material_lower = material.lower().strip()
-        if material_lower not in product["materials"] and "mixed" not in product["materials"]:
-            result["reason"] = f"Material '{material}' is not available for {product_type}."
-            result["alternatives"] = f"Available materials: {', '.join(product['materials'])}"
-            return json.dumps(result)
+    # Check customizations
+    if customizations:
+        custom_lower = customizations.lower()
+        is_supported = any(
+            supported in custom_lower
+            for supported in FEASIBILITY_RULES["supported_customizations"]
+        )
+        if not is_supported:
+            warnings.append(f"Customization '{customizations}' may require special handling.")
     
     # All checks passed
-    result["is_feasible"] = True
-    result["reason"] = "Order is feasible and can be processed."
+    logger.info(f"Feasibility check passed: product={product_type}, qty={quantity}")
     
-    logger.info(f"Feasibility check passed for {product_type} x {quantity}")
-    
-    return json.dumps(result)
+    return _format_result(FeasibilityResult(
+        is_feasible=True,
+        reason="Order is feasible. All requirements are within our capabilities.",
+        warnings=warnings,
+    ))
 
 
 @tool
-def get_product_specifications(product_type: str) -> str:
-    """Get detailed specifications for a product type.
+def get_supported_products() -> str:
+    """Get list of all supported products and customization options.
+    
+    Returns:
+        JSON string with supported products and customizations
+    """
+    return json.dumps({
+        "supported_products": [
+            "t-shirt", "polo", "hoodie", "cap", "mug", "tote bag", "jacket"
+        ],
+        "supported_customizations": [
+            "logo printing", "embroidery", "screen print", "DTG (direct to garment)"
+        ],
+        "quantity_limits": {
+            "min": FEASIBILITY_RULES["min_quantity"],
+            "max": FEASIBILITY_RULES["max_quantity"],
+        },
+        "timeline_limits": {
+            "min_days": FEASIBILITY_RULES["min_lead_time_days"],
+            "max_days": FEASIBILITY_RULES["max_lead_time_days"],
+        },
+    })
+
+
+@tool
+def check_timeline_feasibility(
+    quantity: int,
+    requested_days: int,
+) -> str:
+    """Check if a specific timeline is feasible for a given quantity.
     
     Args:
-        product_type: Type of product to get specifications for
+        quantity: Number of units to produce
+        requested_days: Requested delivery timeline in days
     
     Returns:
-        JSON string with product specifications
+        JSON string with timeline feasibility and recommendations
     """
-    import json
+    logger.info(f"Checking timeline feasibility: qty={quantity}, days={requested_days}")
     
-    product_type_lower = product_type.lower().strip()
+    # Base minimum days
+    min_days = FEASIBILITY_RULES["min_lead_time_days"]
     
-    if product_type_lower not in PRODUCT_CATALOG:
-        return json.dumps({
-            "error": f"Product type '{product_type}' not found",
-            "available_products": list(PRODUCT_CATALOG.keys()),
-        })
+    # Add extra days for larger quantities
+    if quantity > 500:
+        min_days += 2
+    if quantity > 1000:
+        min_days += 3
+    if quantity > 5000:
+        min_days += 5
     
-    specs = PRODUCT_CATALOG[product_type_lower].copy()
-    specs["product_type"] = product_type_lower
+    is_feasible = requested_days >= min_days
     
-    return json.dumps(specs)
-
-
-@tool
-def list_available_products() -> str:
-    """List all available products and their basic specifications.
+    result = {
+        "is_feasible": is_feasible,
+        "requested_days": requested_days,
+        "minimum_days_required": min_days,
+        "recommendation": None,
+    }
     
-    Returns:
-        JSON string with all product types and basic info
-    """
-    import json
+    if not is_feasible:
+        result["recommendation"] = f"For {quantity} units, we need at least {min_days} days. Consider rush processing for faster delivery (additional charges apply)."
+    else:
+        buffer_days = requested_days - min_days
+        if buffer_days >= 7:
+            result["recommendation"] = "Timeline is comfortable. Standard processing recommended."
+        elif buffer_days >= 3:
+            result["recommendation"] = "Timeline is tight but achievable with priority processing."
+        else:
+            result["recommendation"] = "Timeline is very tight. Rush processing strongly recommended."
     
-    products = []
-    for name, specs in PRODUCT_CATALOG.items():
-        products.append({
-            "name": name,
-            "quantity_range": f"{specs['min_quantity']} - {specs['max_quantity']}",
-            "min_timeline_days": specs["min_timeline_days"],
-            "customization_available": specs["customization_available"],
-        })
-    
-    return json.dumps({"products": products})
-
+    return json.dumps(result)

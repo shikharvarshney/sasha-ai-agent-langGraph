@@ -7,6 +7,7 @@ from ..state import FlowState, FlowStatus
 from ..config import get_settings
 from ..utils.approval_handler import ApprovalHandler
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after
 
 logger = logging.getLogger("sasha_sales_ai.nodes.approval")
 
@@ -26,6 +27,9 @@ def check_approval(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("check_approval", state)
+    
     with get_tracing_context(
         name="check_approval",
         tags=["node", "approval", lead_id],
@@ -42,13 +46,17 @@ def check_approval(state: FlowState) -> dict[str, Any]:
         
         logger.info(
             f"Lead {lead_id}: amount=${total_amount:,.2f}, "
+            f"threshold=${settings.approval_threshold:,.2f}, "
             f"needs_approval={needs_approval}"
         )
         
-        return {
+        result = {
             "needs_approval": needs_approval,
             "current_node": "check_approval",
         }
+        
+        log_state_after("check_approval", state, result)
+        return result
 
 
 def request_approval(state: FlowState) -> dict[str, Any]:
@@ -66,6 +74,9 @@ def request_approval(state: FlowState) -> dict[str, Any]:
         Updated state fields
     """
     lead_id = state.get("lead_id", "unknown")
+    
+    # Log state before execution
+    log_state_before("request_approval", state)
     
     with get_tracing_context(
         name="request_approval",
@@ -92,11 +103,14 @@ def request_approval(state: FlowState) -> dict[str, Any]:
         logger.info(f"Approval request created: {approval_id}")
         
         # This is where the flow will interrupt and wait for approval
-        return {
+        result = {
             "status": FlowStatus.APPROVAL_PENDING,
             "approval_notes": f"Approval request: {approval_id}",
             "current_node": "request_approval",
         }
+        
+        log_state_after("request_approval", state, result)
+        return result
 
 
 def process_approval_decision(state: FlowState) -> dict[str, Any]:
@@ -113,6 +127,9 @@ def process_approval_decision(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("process_approval_decision", state)
+    
     with get_tracing_context(
         name="process_approval_decision",
         tags=["node", "approval_decision", lead_id],
@@ -127,19 +144,21 @@ def process_approval_decision(state: FlowState) -> dict[str, Any]:
         )
         
         if approved is True:
-            return {
+            result = {
                 "status": FlowStatus.PRICING,  # Continue to send quote
                 "current_node": "process_approval_decision",
             }
         elif approved is False:
-            return {
+            result = {
                 "status": FlowStatus.REJECTED,
                 "current_node": "process_approval_decision",
             }
         else:
             # Still pending
-            return {
+            result = {
                 "status": FlowStatus.APPROVAL_PENDING,
                 "current_node": "process_approval_decision",
             }
-
+        
+        log_state_after("process_approval_decision", state, result)
+        return result

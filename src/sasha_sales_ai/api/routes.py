@@ -27,14 +27,25 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint"""
+async def health_check(
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    """Health check endpoint with Redis status"""
     settings = get_settings()
     
+    # Get flow manager health
+    fm_health = flow_manager.health_check()
+    
+    # Determine overall status
+    overall_status = "healthy" if fm_health["redis_connected"] else "degraded"
+    
     return HealthResponse(
-        status="healthy",
+        status=overall_status,
         version=__version__,
         langsmith_enabled=bool(settings.langsmith_api_key),
+        redis_connected=fm_health["redis_connected"],
+        lead_count=fm_health["lead_count"],
+        checkpointer_type=fm_health["checkpointer_type"],
     )
 
 
@@ -297,22 +308,27 @@ async def delete_lead(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Delete a lead (for testing/cleanup)"""
-    state = flow_manager.get_state(lead_id)
-    
-    if not state:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Lead {lead_id} not found"
-        )
-    
-    # Remove from manager
-    if lead_id in flow_manager._states:
-        del flow_manager._states[lead_id]
-    
-    # Remove state file
-    state_file = flow_manager.state_storage_path / f"{lead_id}.json"
-    if state_file.exists():
-        state_file.unlink()
-    
-    return {"message": f"Lead {lead_id} deleted"}
+    with get_tracing_context(
+        name="delete_lead",
+        tags=["api", "delete"],
+        metadata={"lead_id": lead_id},
+    ):
+        state = flow_manager.get_state(lead_id)
+        
+        if not state:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Lead {lead_id} not found"
+            )
+        
+        # Delete from Redis storage
+        deleted = flow_manager.delete_lead(lead_id)
+        
+        if deleted:
+            return {"message": f"Lead {lead_id} deleted"}
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete lead {lead_id}"
+            )
 

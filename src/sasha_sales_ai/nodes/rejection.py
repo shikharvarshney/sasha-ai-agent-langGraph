@@ -8,6 +8,7 @@ from ..chains.email_writer import write_rejection_email
 from ..tools.email_tool import send_email
 from ..storage.rag_storage import get_rag_storage
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after, log_outgoing_email
 
 logger = logging.getLogger("sasha_sales_ai.nodes.rejection")
 
@@ -29,6 +30,9 @@ def handle_rejection(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("handle_rejection", state)
+    
     with get_tracing_context(
         name="handle_rejection",
         tags=["node", "rejection", lead_id],
@@ -42,6 +46,11 @@ def handle_rejection(state: FlowState) -> dict[str, Any]:
             customer_name = requirements.get("customer_name", "")
             customer_email = state.get("email_from", "")
             
+            # Build original request summary
+            product_type = requirements.get("product_type", "")
+            quantity = requirements.get("quantity", "")
+            original_request = f"Request for {quantity} {product_type}" if product_type else "Your recent inquiry"
+            
             # Determine rejection reason
             rejection_reason = state.get("feasibility_reason", "")
             if not rejection_reason:
@@ -52,10 +61,16 @@ def handle_rejection(state: FlowState) -> dict[str, Any]:
             # Get alternatives if available
             alternatives = state.get("alternatives", "")
             
+            logger.info(
+                f"Rejection for {lead_id}: reason='{rejection_reason[:100]}...', "
+                f"has_alternatives={bool(alternatives)}"
+            )
+            
             # Generate rejection email
             email_result = write_rejection_email(
                 customer_name=customer_name,
                 customer_email=customer_email,
+                original_request=original_request,
                 rejection_reason=rejection_reason,
                 alternatives=alternatives if alternatives else None,
             )
@@ -65,6 +80,9 @@ def handle_rejection(state: FlowState) -> dict[str, Any]:
                 "Regarding Your Recent Request"
             )
             body = email_result.get("body", "")
+            
+            # Log the outgoing email
+            log_outgoing_email(lead_id, customer_email, subject, body, "rejection")
             
             # Send the email
             send_result = send_email.invoke({
@@ -87,18 +105,22 @@ def handle_rejection(state: FlowState) -> dict[str, Any]:
                 },
             )
             
-            return {
+            result = {
                 "status": FlowStatus.REJECTED,
                 "outgoing_email_subject": subject,
                 "outgoing_email_body": body,
                 "current_node": "handle_rejection",
             }
             
+            log_state_after("handle_rejection", state, result)
+            return result
+            
         except Exception as e:
             logger.error(f"Error handling rejection for {lead_id}: {e}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": str(e),
                 "error_node": "handle_rejection",
             }
-
+            log_state_after("handle_rejection", state, result)
+            return result

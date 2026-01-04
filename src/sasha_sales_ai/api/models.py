@@ -106,6 +106,9 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     langsmith_enabled: bool
+    redis_connected: bool = False
+    lead_count: int = 0
+    checkpointer_type: str = "unknown"
 
 
 class PendingApproval(BaseModel):

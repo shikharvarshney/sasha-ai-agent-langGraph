@@ -30,9 +30,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("LangSmith observability disabled")
     
-    # Initialize flow manager
+    # Initialize flow manager with Redis
     flow_manager = get_flow_manager()
-    logger.info(f"Flow manager initialized, storage: {flow_manager.state_storage_path}")
+    logger.info(f"Flow manager initialized, Redis: {flow_manager.redis_url}")
     
     logger.info("Sasha Sales AI started successfully")
     

@@ -12,26 +12,54 @@ from ..config import get_settings
 
 logger = logging.getLogger("sasha_sales_ai.chains.lead_analyzer")
 
-LEAD_ANALYZER_SYSTEM_PROMPT = """You are an expert sales lead analyzer. Your job is to extract structured information from customer emails and classify their intent.
+LEAD_ANALYZER_SYSTEM_PROMPT = """You are an expert sales lead analyzer for a promotional products company.
+You are METICULOUS and NEVER miss important details.
 
-Analyze the email and extract the following information in JSON format:
+Your job is to analyze incoming customer emails and extract ALL requirements.
+
+REQUIRED FIELDS for ALL orders:
+- Product type (t-shirt, polo, hoodie, cap, mug, tote bag, jacket)
+- Quantity (exact number of items)
+- Delivery address (full shipping address)
+- Material preference (cotton, polyester, blend, etc.)
+
+CONDITIONAL FIELDS (required if customization is mentioned):
+- If customer mentions "logo", "print", "design", "custom", or "branding":
+  * logo_description: Logo/design description or image reference - REQUIRED
+  * logo_color: Logo color(s) - REQUIRED  
+  * logo_placement: Logo placement (front, back, sleeve, pocket) - REQUIRED
+- If order has multiple sizes:
+  * size_distribution: Size breakdown (e.g., 10 S, 20 M, 50 L, 20 XL) - REQUIRED
+
+IMPORTANT: 
+- If ANY required field is missing, add it to missing_fields
+- If customer mentions customization but doesn't provide logo details, those are MISSING
+- Never assume or guess missing information
+- Be very thorough - you are the first line of defense against incomplete orders
+
+Return your analysis as JSON with this EXACT structure:
 {{
-    "customer_name": "extracted customer name or null if not found",
-    "company_name": "extracted company name or null if not found",
-    "product_type": "one of: widget, gadget, component, assembly, or null if unclear",
-    "quantity": "number of units requested or null if not specified",
-    "timeline": "delivery timeline mentioned or null if not specified",
-    "customizations": "any customizations requested or null",
-    "material": "material preference if mentioned or null",
-    "budget": "budget mentioned or null",
-    "customer_intent": "one of: new_inquiry, clarification, confirmation, rejection, modification, question",
-    "confidence_score": "0-1 confidence in the extraction",
+    "email_type": "new or reply",
+    "customer_name": "extracted name or null",
+    "company_name": "company name or null",
+    "requirements": {{
+        "product_type": "t-shirt, polo, hoodie, cap, mug, tote_bag, jacket, or null",
+        "quantity": "number or null",
+        "timeline": "delivery timeline mentioned or null",
+        "delivery_address": "full address or null",
+        "material": "cotton, polyester, blend, or null",
+        "customizations": "description of requested customizations or null",
+        "logo_description": "logo details or null",
+        "logo_color": "logo colors or null",
+        "logo_placement": "front, back, sleeve, pocket, or null",
+        "size_distribution": "size breakdown object or null"
+    }},
+    "missing_fields": ["list of ALL missing required and conditional fields"],
+    "has_customization_request": "true if logo/print/design mentioned, false otherwise",
+    "customer_intent": "new_inquiry, clarification, confirmation, rejection, modification, or question",
+    "confidence_score": "0-1 confidence in extraction",
     "summary": "brief summary of the request"
-}}
-
-Be precise and only extract information that is explicitly stated or can be reasonably inferred.
-If information is ambiguous, use null and note it in the summary.
-"""
+}}"""
 
 LEAD_ANALYZER_HUMAN_TEMPLATE = """Analyze the following email:
 
@@ -43,7 +71,8 @@ Body:
 
 {thread_context}
 
-Extract the structured information and return as JSON."""
+Extract ALL information and identify what's missing. Be thorough!
+Return your analysis as JSON."""
 
 
 def create_lead_analyzer_chain():
@@ -108,34 +137,140 @@ def analyze_lead(
         "thread_history": thread_history,
     })
     
-    logger.info(f"Lead analysis complete: intent={result.get('customer_intent')}")
+    logger.info(f"Lead analysis complete: intent={result.get('customer_intent')}, missing={result.get('missing_fields')}")
+    
+    return result
+
+
+# Missing info checker - determines if we can proceed or need clarification
+MISSING_INFO_CHECKER_PROMPT = """Review the extracted requirements and determine what information is STILL missing.
+
+Requirements extracted so far:
+{requirements}
+
+Has customization been requested: {has_customization}
+
+REQUIRED fields for ALL orders:
+- Product type (t-shirt, polo, hoodie, cap, mug, tote bag, jacket)
+- Quantity (number of items)
+- Delivery address (for shipping)
+- Material preference (cotton, polyester, blend, etc.)
+
+CONDITIONAL fields (REQUIRED if customization is requested):
+- If logo/print is requested (has_customization = true):
+  * logo_description: Logo/design description or image reference
+  * logo_color: Logo color(s)
+  * logo_placement: Logo placement (front, back, sleeve, pocket, etc.)
+- If multiple sizes are needed:
+  * size_distribution: Size breakdown (e.g., {{"S": 10, "M": 20, "L": 50, "XL": 20}})
+
+IMPORTANT: 
+- If has_customization is true and logo details are missing, they MUST be in missing_fields
+- Only list fields that are ACTUALLY missing (null or empty)
+- Be specific about what's needed
+
+Return JSON:
+{{
+    "has_missing_info": true/false,
+    "missing_fields": [
+        {{"field": "field_name", "description": "Clear description of what's needed"}}
+    ],
+    "can_proceed_to_pricing": true/false
+}}"""
+
+
+def create_missing_info_checker_chain():
+    """Create a chain to check for missing information.
+    
+    Returns:
+        Runnable chain for missing info check
+    """
+    settings = get_settings()
+    
+    llm = ChatOpenAI(
+        model=settings.model_name,
+        temperature=0,
+    )
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("human", MISSING_INFO_CHECKER_PROMPT),
+    ])
+    
+    parser = JsonOutputParser()
+    
+    return prompt | llm | parser
+
+
+def check_missing_info(requirements: dict, has_customization: bool = False) -> dict[str, Any]:
+    """Check what information is still missing from requirements.
+    
+    Args:
+        requirements: Extracted requirements dict
+        has_customization: Whether customization was requested
+    
+    Returns:
+        Dictionary with missing info details
+    """
+    logger.info("Checking for missing information")
+    
+    chain = create_missing_info_checker_chain()
+    
+    import json
+    result = chain.invoke({
+        "requirements": json.dumps(requirements, indent=2),
+        "has_customization": str(has_customization).lower(),
+    })
+    
+    logger.info(f"Missing info check: has_missing={result.get('has_missing_info')}")
     
     return result
 
 
 # Intent classification chain for reply processing
-INTENT_CLASSIFIER_PROMPT = """Classify the customer's intent from their reply email.
+INTENT_CLASSIFIER_PROMPT = """Analyze the customer's reply to determine their intent and extract ANY new information.
 
 Previous context:
 {thread_history}
 
+Previous quote (if any):
+{previous_quote}
+
 Customer reply:
 {email_body}
 
-Classify the intent as one of:
-- confirmation: Customer is confirming/accepting a quote or order
-- rejection: Customer is declining or not interested
-- modification: Customer wants changes to the quote
-- question: Customer has questions about the quote/product
-- clarification: Customer is providing requested information
+CRITICAL DISTINCTION:
+- "providing_info" = Customer is providing missing information (address, sizes, material, logo details, etc.)
+- "confirmation" = Customer EXPLICITLY says "yes", "I confirm", "proceed with order", "accept the quote"
+- "rejection" = Customer says "no", "cancel", "not interested"
+- "question" = Customer is asking questions about the product/quote
+- "modification" = Customer wants to change previously confirmed details
+
+IMPORTANT: 
+- If customer provides information like address, sizes, material - that is "providing_info", NOT "confirmation"!
+- "confirmation" should ONLY be true if customer explicitly agrees to proceed with an order/quote
+- Extract ALL new information provided into the modifications object
 
 Return JSON:
 {{
-    "intent": "one of the above",
-    "confidence": "0-1 confidence score",
+    "intent": "providing_info, confirmation, rejection, question, or modification",
+    "confirmed": true/false (TRUE only if customer explicitly confirms order/quote),
+    "modifications": {{
+        "delivery_address": "any address mentioned or null",
+        "material": "any material preference or null",
+        "size_distribution": "any size breakdown or null",
+        "logo_description": "any logo/design details or null",
+        "logo_color": "any logo colors or null",
+        "logo_placement": "any placement info or null",
+        "quantity": "if quantity changed or null",
+        "timeline": "if timeline mentioned or null"
+    }},
+    "questions": ["list of questions if any"],
     "key_points": ["list of key points from the reply"],
-    "action_required": "brief description of what action is needed"
-}}"""
+    "summary": "brief summary of what customer is saying",
+    "action_required": "what action should be taken next"
+}}
+
+DO NOT leave modifications as all nulls if the customer provided ANY new information!"""
 
 
 def create_intent_classifier_chain():
@@ -163,15 +298,17 @@ def create_intent_classifier_chain():
 def classify_reply_intent(
     email_body: str,
     thread_history: str = "",
+    previous_quote: str = "",
 ) -> dict[str, Any]:
-    """Classify the intent of a customer reply.
+    """Classify the intent of a customer reply and extract new information.
     
     Args:
         email_body: Reply email body
         thread_history: Previous conversation history
+        previous_quote: Previous quote if any
     
     Returns:
-        Dictionary with intent classification
+        Dictionary with intent classification and extracted info
     """
     logger.info("Classifying reply intent")
     
@@ -180,9 +317,9 @@ def classify_reply_intent(
     result = chain.invoke({
         "email_body": email_body,
         "thread_history": thread_history,
+        "previous_quote": previous_quote or "No previous quote",
     })
     
-    logger.info(f"Intent classified: {result.get('intent')}")
+    logger.info(f"Intent classified: {result.get('intent')}, confirmed={result.get('confirmed')}")
     
     return result
-

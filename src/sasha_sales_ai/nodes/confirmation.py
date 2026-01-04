@@ -10,6 +10,7 @@ from ..tools.email_tool import send_email
 from ..tools.order_tool import format_order_details
 from ..storage.rag_storage import get_rag_storage
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after, log_outgoing_email
 
 logger = logging.getLogger("sasha_sales_ai.nodes.confirmation")
 
@@ -31,6 +32,9 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
     """
     lead_id = state.get("lead_id", "unknown")
     
+    # Log state before execution
+    log_state_before("send_confirmation", state)
+    
     with get_tracing_context(
         name="send_confirmation",
         tags=["node", "confirmation", lead_id],
@@ -44,10 +48,15 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
             total_amount = state.get("total_amount", 0)
             order_id = state.get("order_id", "")
             
-            customer_name = requirements.get("customer_name", "")
+            # Handle nested requirements structure
+            nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
+            
+            customer_name = requirements.get("customer_name") or nested_req.get("customer_name") or ""
             customer_email = state.get("email_from", "")
-            product_type = requirements.get("product_type", "widget")
-            quantity = requirements.get("quantity", 0)
+            product_type = requirements.get("product_type") or nested_req.get("product_type") or "t-shirt"
+            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+            delivery_address = requirements.get("delivery_address") or nested_req.get("delivery_address") or ""
+            customizations = requirements.get("customizations") or nested_req.get("customizations") or ""
             
             # Parse quantity
             if isinstance(quantity, str):
@@ -57,7 +66,7 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
                     quantity = 0
             
             # Calculate estimated delivery
-            timeline = requirements.get("timeline")
+            timeline = requirements.get("timeline") or nested_req.get("timeline")
             if timeline:
                 if isinstance(timeline, str):
                     import re
@@ -81,9 +90,14 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
             order_details = format_order_details({
                 "product_type": product_type,
                 "quantity": quantity,
-                "customizations": requirements.get("customizations"),
+                "customizations": customizations,
                 "total_amount": total_amount,
             })
+            
+            logger.info(
+                f"Generating confirmation for order {order_id}: "
+                f"{quantity}x {product_type}, delivery by {estimated_delivery}"
+            )
             
             # Generate confirmation email
             email_result = write_confirmation_email(
@@ -94,6 +108,8 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
                 quantity=quantity,
                 total_amount=total_amount,
                 estimated_delivery=estimated_delivery,
+                delivery_address=delivery_address,
+                customization_details=customizations,
                 additional_details=order_details,
             )
             
@@ -102,6 +118,9 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
                 f"Order Confirmation - #{order_id}"
             )
             body = email_result.get("body", "")
+            
+            # Log the outgoing email
+            log_outgoing_email(lead_id, customer_email, subject, body, "confirmation")
             
             # Send the email
             send_result = send_email.invoke({
@@ -124,18 +143,22 @@ def send_confirmation(state: FlowState) -> dict[str, Any]:
                 },
             )
             
-            return {
+            result = {
                 "status": FlowStatus.COMPLETED,
                 "outgoing_email_subject": subject,
                 "outgoing_email_body": body,
                 "current_node": "send_confirmation",
             }
             
+            log_state_after("send_confirmation", state, result)
+            return result
+            
         except Exception as e:
             logger.error(f"Error sending confirmation for {lead_id}: {e}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": str(e),
                 "error_node": "send_confirmation",
             }
-
+            log_state_after("send_confirmation", state, result)
+            return result

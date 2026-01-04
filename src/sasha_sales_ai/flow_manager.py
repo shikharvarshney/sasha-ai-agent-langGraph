@@ -1,10 +1,7 @@
-"""Flow manager for LangGraph workflows"""
+"""Flow manager for LangGraph workflows with Redis persistence"""
 
-import json
 import logging
-from pathlib import Path
 from typing import Optional, Any
-from datetime import datetime
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
@@ -12,77 +9,89 @@ from langgraph.graph.state import CompiledStateGraph
 from .state import FlowState, FlowStatus, create_initial_state
 from .graph import create_sales_graph
 from .config import get_settings
+from .storage.redis_store import RedisStateStore
 from .utils.langsmith_helpers import get_tracing_context
 
 logger = logging.getLogger("sasha_sales_ai.flow_manager")
 
 
+def _get_checkpointer(redis_url: str):
+    """Get the appropriate checkpointer based on configuration.
+    
+    Tries to use Redis checkpointer, falls back to memory if unavailable.
+    
+    Args:
+        redis_url: Redis connection URL
+        
+    Returns:
+        Checkpointer instance
+    """
+    try:
+        from langgraph.checkpoint.redis import RedisSaver
+        
+        checkpointer = RedisSaver.from_conn_string(redis_url)
+        checkpointer.setup()
+        logger.info("Using Redis checkpointer for LangGraph")
+        return checkpointer
+    except ImportError:
+        logger.warning(
+            "langgraph-checkpoint-redis not installed, using MemorySaver. "
+            "Install with: pip install langgraph-checkpoint-redis"
+        )
+        return MemorySaver()
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis checkpointer: {e}. Using MemorySaver.")
+        return MemorySaver()
+
+
 class FlowManager:
-    """Manager for LangGraph workflow instances and state persistence"""
+    """Manager for LangGraph workflow instances with Redis persistence.
+    
+    This manager handles:
+    - Lead state persistence via Redis
+    - LangGraph checkpointing via Redis
+    - Graph execution and resumption
+    - Approval workflow management
+    """
     
     def __init__(
         self,
-        state_storage_path: Optional[str] = None,
+        redis_url: Optional[str] = None,
+        key_prefix: Optional[str] = None,
     ):
         """Initialize the flow manager.
         
         Args:
-            state_storage_path: Path for state persistence
+            redis_url: Redis connection URL (uses config if not provided)
+            key_prefix: Redis key prefix (uses config if not provided)
         """
         settings = get_settings()
         
-        self.state_storage_path = Path(
-            state_storage_path or settings.state_storage_path
+        # Redis configuration
+        self.redis_url = redis_url or settings.redis_url
+        self.key_prefix = key_prefix or settings.redis_key_prefix
+        
+        # Initialize Redis state store for lead states
+        self.state_store = RedisStateStore(
+            redis_url=self.redis_url,
+            key_prefix=self.key_prefix,
         )
-        self.state_storage_path.mkdir(parents=True, exist_ok=True)
         
-        # Use memory checkpointer (can be upgraded to SQLite for persistence)
-        self.checkpointer = MemorySaver()
+        # Initialize checkpointer for LangGraph
+        self.checkpointer = _get_checkpointer(self.redis_url)
         
-        # Create the graph
+        # Create the graph with checkpointer
         self.graph: CompiledStateGraph = create_sales_graph(
             checkpointer=self.checkpointer
         )
         
-        # Cache for states
-        self._states: dict[str, FlowState] = {}
+        # In-memory cache for performance (optional)
+        self._cache: dict[str, FlowState] = {}
         
-        # Load existing states from disk
-        self._load_existing_states()
-        
-        logger.info(f"FlowManager initialized with storage at {self.state_storage_path}")
-    
-    def _load_existing_states(self) -> None:
-        """Load existing states from disk"""
-        for state_file in self.state_storage_path.glob("*.json"):
-            try:
-                with open(state_file) as f:
-                    state_data = json.load(f)
-                    lead_id = state_data.get("lead_id")
-                    if lead_id:
-                        self._states[lead_id] = state_data
-                        logger.debug(f"Loaded state for lead {lead_id}")
-            except Exception as e:
-                logger.warning(f"Failed to load state from {state_file}: {e}")
-    
-    def _save_state(self, lead_id: str, state: FlowState) -> None:
-        """Save state to disk.
-        
-        Args:
-            lead_id: Lead identifier
-            state: State to save
-        """
-        state_file = self.state_storage_path / f"{lead_id}.json"
-        
-        # Add metadata
-        state_with_meta = dict(state)
-        state_with_meta["_updated_at"] = datetime.now().isoformat()
-        
-        with open(state_file, "w") as f:
-            json.dump(state_with_meta, f, indent=2, default=str)
-        
-        self._states[lead_id] = state_with_meta
-        logger.debug(f"Saved state for lead {lead_id}")
+        logger.info(
+            f"FlowManager initialized with Redis at {self.redis_url} "
+            f"(prefix: {self.key_prefix})"
+        )
     
     def get_state(self, lead_id: str) -> Optional[FlowState]:
         """Get the current state for a lead.
@@ -93,7 +102,42 @@ class FlowManager:
         Returns:
             Current state or None if not found
         """
-        return self._states.get(lead_id)
+        # Check cache first
+        if lead_id in self._cache:
+            return self._cache[lead_id]
+        
+        # Fetch from Redis
+        state = self.state_store.get(lead_id)
+        if state:
+            self._cache[lead_id] = state
+        return state
+    
+    def _save_state(self, lead_id: str, state: FlowState) -> None:
+        """Save state to Redis and update cache.
+        
+        Args:
+            lead_id: Lead identifier
+            state: State to save
+        """
+        self.state_store.set(lead_id, state)
+        self._cache[lead_id] = state
+        logger.debug(f"Saved state for lead {lead_id}")
+    
+    def _delete_state(self, lead_id: str) -> bool:
+        """Delete state from Redis and cache.
+        
+        Args:
+            lead_id: Lead identifier
+            
+        Returns:
+            True if deleted
+        """
+        # Remove from cache
+        if lead_id in self._cache:
+            del self._cache[lead_id]
+        
+        # Remove from Redis
+        return self.state_store.delete(lead_id)
     
     def get_or_create_state(
         self,
@@ -115,14 +159,17 @@ class FlowManager:
         Returns:
             FlowState for the lead
         """
-        if lead_id in self._states:
-            state = self._states[lead_id]
+        # Check for existing state
+        state = self.get_state(lead_id)
+        
+        if state:
             # Update with new email data if provided
             if email_body:
                 state["email_from"] = email_from
                 state["email_subject"] = email_subject
                 state["email_body"] = email_body
                 state["email_type"] = email_type
+                self._save_state(lead_id, state)
             return state
         
         # Create new state
@@ -134,7 +181,6 @@ class FlowManager:
             email_type=email_type,
         )
         
-        self._states[lead_id] = state
         self._save_state(lead_id, state)
         
         return state
@@ -175,8 +221,7 @@ class FlowManager:
                 },
             )
             
-            # Update and save state
-            self._states[lead_id] = result
+            # Save state to Redis
             self._save_state(lead_id, result)
             
             logger.info(
@@ -221,8 +266,7 @@ class FlowManager:
                 },
             )
             
-            # Update and save state
-            self._states[lead_id] = result
+            # Save state to Redis
             self._save_state(lead_id, result)
             
             logger.info(
@@ -260,10 +304,11 @@ class FlowManager:
             )
             
             if current_state is None or current_state.values is None:
-                # No checkpoint found, use cached state
-                if lead_id not in self._states:
+                # No checkpoint found, use Redis state
+                redis_state = self.get_state(lead_id)
+                if not redis_state:
                     raise ValueError(f"No state found for lead {lead_id}")
-                current_values = self._states[lead_id]
+                current_values = redis_state
             else:
                 current_values = dict(current_state.values)
             
@@ -275,7 +320,12 @@ class FlowManager:
             
             return result
     
-    def approve_lead(self, lead_id: str, approved_by: str = "system", notes: str = "") -> FlowState:
+    def approve_lead(
+        self,
+        lead_id: str,
+        approved_by: str = "system",
+        notes: str = ""
+    ) -> FlowState:
         """Approve a pending lead and resume flow.
         
         Args:
@@ -302,7 +352,12 @@ class FlowManager:
         # Resume flow synchronously
         return self.run_flow_sync(lead_id, state)
     
-    def reject_lead(self, lead_id: str, rejected_by: str = "system", reason: str = "") -> FlowState:
+    def reject_lead(
+        self,
+        lead_id: str,
+        rejected_by: str = "system",
+        reason: str = ""
+    ) -> FlowState:
         """Reject a pending lead and resume flow.
         
         Args:
@@ -329,6 +384,18 @@ class FlowManager:
         # Resume flow synchronously
         return self.run_flow_sync(lead_id, state)
     
+    def delete_lead(self, lead_id: str) -> bool:
+        """Delete a lead from storage.
+        
+        Args:
+            lead_id: Lead identifier
+            
+        Returns:
+            True if deleted
+        """
+        logger.info(f"Deleting lead {lead_id}")
+        return self._delete_state(lead_id)
+    
     def list_leads(self, status: Optional[str] = None) -> list[dict[str, Any]]:
         """List all leads, optionally filtered by status.
         
@@ -338,22 +405,7 @@ class FlowManager:
         Returns:
             List of lead summaries
         """
-        leads = []
-        
-        for lead_id, state in self._states.items():
-            if status and state.get("status") != status:
-                continue
-            
-            leads.append({
-                "lead_id": lead_id,
-                "status": state.get("status"),
-                "email_from": state.get("email_from"),
-                "email_subject": state.get("email_subject"),
-                "total_amount": state.get("total_amount"),
-                "updated_at": state.get("_updated_at"),
-            })
-        
-        return leads
+        return self.state_store.list_all(status=status)
     
     def get_pending_approvals(self) -> list[dict[str, Any]]:
         """Get all leads pending approval.
@@ -361,7 +413,22 @@ class FlowManager:
         Returns:
             List of leads pending approval
         """
-        return self.list_leads(status=FlowStatus.APPROVAL_PENDING)
+        return self.state_store.get_by_status(FlowStatus.APPROVAL_PENDING)
+    
+    def health_check(self) -> dict[str, Any]:
+        """Check health of flow manager and its dependencies.
+        
+        Returns:
+            Health status dictionary
+        """
+        redis_healthy = self.state_store.health_check()
+        lead_count = self.state_store.count() if redis_healthy else 0
+        
+        return {
+            "redis_connected": redis_healthy,
+            "lead_count": lead_count,
+            "checkpointer_type": type(self.checkpointer).__name__,
+        }
 
 
 # Global flow manager instance
@@ -379,3 +446,11 @@ def get_flow_manager() -> FlowManager:
         _flow_manager = FlowManager()
     return _flow_manager
 
+
+def reset_flow_manager() -> None:
+    """Reset the global flow manager instance.
+    
+    Useful for testing or reconfiguration.
+    """
+    global _flow_manager
+    _flow_manager = None

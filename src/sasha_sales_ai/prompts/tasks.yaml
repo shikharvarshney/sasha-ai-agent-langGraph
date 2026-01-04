@@ -1,0 +1,374 @@
+# Task Configuration
+# This file contains settings for workflow tasks and detailed task prompts
+
+workflow:
+  # Timeout settings (seconds)
+  default_timeout: 300
+  llm_timeout: 60
+  
+  # Retry settings
+  max_retries: 3
+  retry_delay: 1
+  
+  # Approval settings
+  approval_threshold: 10000.0
+  auto_approve_below: 1000.0
+  
+  # Email settings
+  quote_validity_days: 30
+  default_delivery_days: 14
+
+# Node timeout settings  
+nodes:
+  ingest_email:
+    timeout: 30
+    
+  understand_lead:
+    timeout: 60
+    
+  request_clarification:
+    timeout: 60
+    
+  check_feasibility:
+    timeout: 30
+    
+  calculate_pricing:
+    timeout: 60
+    
+  check_approval:
+    timeout: 10
+    
+  request_approval:
+    timeout: 30
+    
+  send_quote:
+    timeout: 60
+    
+  process_reply:
+    timeout: 60
+    
+  place_order:
+    timeout: 30
+    
+  send_confirmation:
+    timeout: 60
+    
+  handle_rejection:
+    timeout: 60
+
+# Task definitions with detailed prompts
+tasks:
+  understand_lead:
+    description: |
+      Analyze the incoming customer email and extract key information:
+      
+      Email Content: {email_body}
+      From: {email_from}
+      Subject: {email_subject}
+      Thread History: {thread_history}
+      
+      Tasks:
+      1. Determine if this is a NEW email or a REPLY to an existing conversation
+      2. Extract product requirements (type, quantity, specifications, material)
+      3. Identify delivery timeline and address requirements
+      4. List any special requests or customizations
+      5. Note ALL missing information needed for a quote
+      
+      REQUIRED fields for ALL orders:
+      - Product type (t-shirt, polo, hoodie, cap, mug, tote bag, jacket)
+      - Quantity (number of items)
+      - Delivery address (for shipping)
+      - Material preference (cotton, polyester, blend)
+      
+      CONDITIONAL fields (if customization requested):
+      - Logo/design description
+      - Logo colors
+      - Logo placement (front, back, sleeve, pocket)
+      - Size distribution (if multiple sizes needed)
+      
+      Return a structured analysis with all findings.
+    expected_output: |
+      A JSON object with:
+      - email_type: "new" or "reply"
+      - requirements: object with product, quantity, specifications, timeline, material, delivery_address
+      - has_customization: boolean indicating if logo/print/design mentioned
+      - missing_fields: list of ALL missing required and conditional fields
+      - customer_intent: "new_inquiry", "clarification", "confirmation", "question", or "rejection"
+      - summary: brief summary of the request
+    agent: lead_analyzer
+
+  check_missing_info:
+    description: |
+      Review the extracted requirements and determine if any critical information is missing:
+      
+      Requirements: {requirements}
+      Has Customization Request: {has_customization}
+      
+      REQUIRED fields for ALL orders:
+      - Product type (t-shirt, polo, hoodie, cap, mug, tote bag, jacket)
+      - Quantity (number of items)
+      - Delivery address (for shipping)
+      - Material preference (cotton, polyester, blend, etc.)
+      
+      CONDITIONAL fields (required if customization is requested):
+      - If logo/print is requested:
+        * Logo/design description or image reference
+        * Logo color(s)
+        * Logo placement (front, back, sleeve, pocket, etc.)
+      - If multiple sizes:
+        * Size distribution (e.g., 10 S, 20 M, 50 L, 20 XL)
+      
+      IMPORTANT: If customer mentions logo, print, design, or customization,
+      you MUST check for logo details, color, and placement - if not provided, they are MISSING.
+      
+      Determine if we can proceed to pricing or need to ask for clarification.
+    expected_output: |
+      A JSON object with:
+      - has_missing_info: boolean
+      - missing_fields: list of missing field names with clear descriptions
+      - can_proceed: boolean indicating if we have enough info for a quote
+    agent: lead_analyzer
+
+  compose_clarification_email:
+    description: |
+      Compose a friendly email to request ONLY the missing information from the customer.
+      
+      Customer Name: {customer_name}
+      Customer Email: {customer_email}
+      Missing Information: {missing_fields}
+      Original Request Summary: {request_summary}
+      
+      CRITICAL RULES:
+      1. ONLY ask for items in the "Missing Information" list - NOTHING ELSE!
+      2. DO NOT ask for confirmation or re-confirmation of any information
+      3. DO NOT ask for things already provided (address, size, material, etc. if not in missing list)
+      4. If a field is NOT in the Missing Information list, assume we already have it
+      
+      Write a professional email that:
+      1. Thanks them for providing the information so far
+      2. Lists ONLY the specific missing items from {missing_fields}
+      3. For each missing item, briefly explain why we need it
+      4. Ends with a helpful closing
+      
+      DO NOT:
+      - Ask for delivery address if not in missing list
+      - Ask for size distribution if not in missing list  
+      - Ask for material if not in missing list
+      - Ask customers to "confirm" anything - just ask for missing info
+    expected_output: |
+      A complete email with:
+      - subject: Email subject line
+      - body: Full email body asking ONLY for items in the missing_fields list
+    agent: email_writer
+
+  process_customer_reply:
+    description: |
+      Analyze the customer's reply to determine their intent and extract any new information.
+      
+      Reply Email Body: {reply_body}
+      Thread History: {thread_history}
+      Previous Quote: {previous_quote}
+      
+      CRITICAL DISTINCTION:
+      - "providing_info" = Customer is providing missing information (address, sizes, material, logo details, etc.)
+      - "confirmation" = Customer EXPLICITLY says "yes", "I confirm", "proceed with order", "accept the quote"
+      - "rejection" = Customer says "no", "cancel", "not interested"
+      - "question" = Customer is asking questions
+      - "modification" = Customer wants to change previously confirmed details
+      
+      IMPORTANT: If customer provides information like address, sizes, material - that is NOT confirmation!
+      "confirmation" should ONLY be true if customer explicitly agrees to proceed with an order/quote.
+      
+      You MUST extract ALL new information provided and put it in "modifications":
+      - delivery_address: any address mentioned
+      - material: any material preference (cotton, polyester, etc.)
+      - size_distribution: any size breakdown (e.g., {"M": 50, "L": 50})
+      - logo_description: any logo/design details
+      - logo_color: any logo colors
+      - logo_placement: any placement info (front, back, etc.)
+      
+      DO NOT leave "modifications" as null if customer provided ANY new information!
+    expected_output: |
+      A JSON object with:
+      - intent: "providing_info", "confirmation", "rejection", "question", or "modification"
+      - confirmed: boolean (TRUE only if customer explicitly confirms order/quote)
+      - modifications: object with ALL extracted info (delivery_address, material, size_distribution, etc.) - NEVER null if info was provided
+      - questions: list of questions if any
+      - summary: brief summary of the reply
+    agent: lead_analyzer
+
+  compose_quote_email:
+    description: |
+      Compose a professional quote email to send to the customer:
+      
+      Customer Name: {customer_name}
+      Customer Email: {customer_email}
+      Order Summary: {order_summary}
+      Requirements: {requirements}
+      Price Quote: {price_quote}
+      Pricing Breakdown: {pricing_breakdown}
+      
+      Write a complete quote email that:
+      1. Thanks them for their inquiry
+      2. Summarizes our understanding of their requirements
+      3. Presents the quote with clear pricing breakdown
+      4. Total amount prominently displayed
+      5. States next steps to confirm the order
+      6. Includes validity period (30 days) and terms
+    expected_output: |
+      A complete email with:
+      - subject: Email subject line
+      - body: Full email body text with quote details
+    agent: email_writer
+
+  compose_confirmation_email:
+    description: |
+      Compose an order confirmation email:
+      
+      Customer Name: {customer_name}
+      Customer Email: {customer_email}
+      Order Details: {order_details}
+      Order ID: {order_id}
+      
+      Write a confirmation email that:
+      1. Confirms the order has been placed
+      2. Includes the order ID for reference prominently
+      3. Summarizes what was ordered (product, quantity, customizations)
+      4. Provides expected timeline
+      5. Includes delivery address
+      6. Includes contact information for questions
+      7. Thanks them for their business
+    expected_output: |
+      A complete email with:
+      - subject: Email subject line
+      - body: Full email body with order confirmation
+    agent: email_writer
+
+  compose_rejection_email:
+    description: |
+      Compose a professional email explaining why we cannot fulfill the request:
+      
+      Customer Name: {customer_name}
+      Customer Email: {customer_email}
+      Original Request: {original_request}
+      Rejection Reason: {rejection_reason}
+      Alternatives: {alternatives}
+      
+      Write an email that:
+      1. Thanks them for their interest
+      2. Politely explains why we cannot fulfill their exact request
+      3. Offers any available alternatives if applicable
+      4. Keeps the door open for future business
+    expected_output: |
+      A complete email with:
+      - subject: Email subject line
+      - body: Full email body text
+    agent: email_writer
+
+  explain_pricing:
+    description: |
+      Create a clear explanation of the pricing for the customer:
+      
+      Requirements: {requirements}
+      Price Quote: {price_quote}
+      Pricing Context: {pricing_context}
+      
+      Write a pricing explanation that:
+      1. Summarizes what's included in the quote
+      2. Breaks down the major cost components (base price, customization, setup)
+      3. Highlights any value-adds or included services
+      4. Mentions any applicable volume discounts
+      5. States the total clearly
+      6. Includes payment terms and validity period
+    expected_output: |
+      A clear pricing explanation suitable for including in a quote email
+    agent: pricing_expert
+
+# Product catalog
+products:
+  t-shirt:
+    base_price: 10.00
+    min_quantity: 10
+    max_quantity: 10000
+    min_timeline_days: 3
+    customization_options:
+      - logo_print
+      - embroidery
+      - screen_print
+      - dtg
+    
+  polo:
+    base_price: 15.00
+    min_quantity: 10
+    max_quantity: 10000
+    min_timeline_days: 5
+    customization_options:
+      - logo_print
+      - embroidery
+    
+  hoodie:
+    base_price: 25.00
+    min_quantity: 10
+    max_quantity: 5000
+    min_timeline_days: 7
+    customization_options:
+      - logo_print
+      - embroidery
+      - screen_print
+    
+  cap:
+    base_price: 8.00
+    min_quantity: 10
+    max_quantity: 10000
+    min_timeline_days: 3
+    customization_options:
+      - logo_print
+      - embroidery
+    
+  mug:
+    base_price: 12.00
+    min_quantity: 10
+    max_quantity: 5000
+    min_timeline_days: 5
+    customization_options:
+      - logo_print
+    
+  tote_bag:
+    base_price: 7.00
+    min_quantity: 10
+    max_quantity: 10000
+    min_timeline_days: 3
+    customization_options:
+      - logo_print
+      - screen_print
+    
+  jacket:
+    base_price: 40.00
+    min_quantity: 10
+    max_quantity: 1000
+    min_timeline_days: 14
+    customization_options:
+      - logo_print
+      - embroidery
+
+# Customization pricing (additional cost per item)
+customizations:
+  logo_print:
+    setup_fee: 25.00
+    per_item: 2.00
+    description: "Logo printing on garments"
+    
+  embroidery:
+    setup_fee: 50.00
+    per_item: 4.00
+    description: "Embroidered logo/design"
+    
+  screen_print:
+    setup_fee: 35.00
+    per_item: 1.50
+    description: "Screen printed design"
+    
+  dtg:
+    setup_fee: 0.00
+    per_item: 3.00
+    description: "Direct to garment printing"

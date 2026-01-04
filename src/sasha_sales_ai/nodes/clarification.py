@@ -8,6 +8,7 @@ from ..chains.email_writer import write_clarification_email
 from ..tools.email_tool import send_email
 from ..storage.rag_storage import get_rag_storage
 from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after, log_outgoing_email
 
 logger = logging.getLogger("sasha_sales_ai.nodes.clarification")
 
@@ -28,6 +29,9 @@ def request_clarification(state: FlowState) -> dict[str, Any]:
         Updated state fields
     """
     lead_id = state.get("lead_id", "unknown")
+    
+    # Log state before execution
+    log_state_before("request_clarification", state)
     
     with get_tracing_context(
         name="request_clarification",
@@ -60,6 +64,9 @@ def request_clarification(state: FlowState) -> dict[str, Any]:
             subject = email_result.get("subject", "Additional Information Needed")
             body = email_result.get("body", "")
             
+            # Log the outgoing email
+            log_outgoing_email(lead_id, customer_email, subject, body, "clarification")
+            
             # Send the email
             send_result = send_email.invoke({
                 "to_address": customer_email,
@@ -78,18 +85,22 @@ def request_clarification(state: FlowState) -> dict[str, Any]:
                 metadata={"type": "clarification"},
             )
             
-            return {
+            result = {
                 "status": FlowStatus.CLARIFYING,
                 "outgoing_email_subject": subject,
                 "outgoing_email_body": body,
                 "current_node": "request_clarification",
             }
             
+            log_state_after("request_clarification", state, result)
+            return result
+            
         except Exception as e:
             logger.error(f"Error requesting clarification for {lead_id}: {e}")
-            return {
+            result = {
                 "status": FlowStatus.ERROR,
                 "error_message": str(e),
                 "error_node": "request_clarification",
             }
-
+            log_state_after("request_clarification", state, result)
+            return result
