@@ -180,7 +180,7 @@ However, this does not deny the need of Code Reviews. They are still primary.
 - In some other optimisation strategy you can always make a command to instruct AI to do the PR Review of their own code. It has been proven that re-iterating 
 an AI to force into feedback loop often improves the result.
 
-`# You are helping develop a new feature.
+` You are helping develop a new feature
 
 IMPORTANT:
 - Before responding, ensure that `@coding-standards.mdc` is included in context.
@@ -399,6 +399,14 @@ Cursor (like most AI coding tools) resolves instructions roughly in this order:
 - Rules (user --> project) -- But this is not 100% picked up everytime by cursor.
 - Chat prompt / instructions
 - Implicit inference
+
+## 18. Run Multi agents for the same task
+- You can run multi agents by selecting different models using the 1x symbol besides the model name in chat window.
+- once done, cursor automatically selects the best answer giving you double conformity.
+
+## 19. Switch branches without commmiting or stashing the code
+- you can now swithc the branches by using the Laptop icon beneath the chat window and select `worktree` and then choosing branch.
+- this will help you to immediately change context to provide any hotfixes in the main branch even if you are working on some feature branch.
 
 ---
 
