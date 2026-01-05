@@ -243,7 +243,7 @@ curl http://localhost:8000/api/v1/leads
 curl -X POST http://localhost:8000/api/v1/webhook/reply \
   -H "Content-Type: application/json" \
   -d '{
-    "lead_id": "lead-2a1d3f5a",
+    "lead_id": "lead-6d3596a1",
     "from_email": "customer@example.com",
     "subject": "Re: Your Quote",
     "body": "Yes, I confirm the order. Please proceed.",
@@ -254,7 +254,7 @@ curl -X POST http://localhost:8000/api/v1/webhook/reply \
 curl -X POST http://localhost:8000/api/v1/webhook/reply \
   -H "Content-Type: application/json" \
   -d '{
-    "lead_id": "lead-2a1d3f5a",
+    "lead_id": "lead-6d3596a1",
     "from_email": "customer@example.com",
     "subject": "Re: Need more information",
     "body": "Thanks for getting back to me. I will be needing this order at 222 Broadway, NYC. The material would be pure cotton and you can send 50 in size M and 50 in size L.",
@@ -265,7 +265,7 @@ curl -X POST http://localhost:8000/api/v1/webhook/reply \
 curl -X POST http://localhost:8000/api/v1/webhook/reply \
   -H "Content-Type: application/json" \
   -d '{
-    "lead_id": "lead-2a1d3f5a",
+    "lead_id": "lead-6d3596a1",
     "from_email": "customer@example.com",
     "subject": "Re: Logo Details",
     "body": "I need a very simple logo of my company in White color at the top right corner of the shirt above the pocket.",
