@@ -371,7 +371,7 @@ Cursor (like most AI coding tools) resolves instructions roughly in this order:
 - Implicit inference
 
 
-18. *** How to Define User Rules *** (This has to be put in each developer's cursor based user rules)
+## 18. How to Define User Rules (This has to be put in each developer's cursor based user rules)
 
 --- # Global Cursor Behavior Rule
 
