@@ -80,7 +80,7 @@ def ingest_email(state: FlowState) -> dict[str, Any]:
             "thread_history": thread_history,
             "current_node": "ingest_email",
         }
-        
+        logger.info(f"Result: {result}")
         # Log state after execution
         log_state_after("ingest_email", state, result)
         

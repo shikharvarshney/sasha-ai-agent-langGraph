@@ -1,0 +1,161 @@
+---
+description: Project directory structure and important files reference
+globs:
+alwaysApply: true
+---
+# Directory Structure
+
+Complete directory layout for the Sasha Sales AI project.
+
+## Root Directory
+
+```
+sasha-ai-agent-langGraph/
+├── .cursor/                    # Cursor IDE configuration
+│   └── rules/                  # Cursor rules (this folder)
+├── src/                        # Source code
+│   └── sasha_sales_ai/         # Main package
+├── tests/                      # Test suite
+├── docker-compose.yml          # Production Docker setup
+├── docker-compose.dev.yml      # Development Docker setup (hot reload)
+├── Dockerfile                  # Container build instructions
+├── pyproject.toml              # Python project metadata
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
+```
+
+## Source Code Structure
+
+```
+src/sasha_sales_ai/
+├── __init__.py                 # Package initialization
+├── main.py                     # FastAPI application entry point
+├── config.py                   # Pydantic settings & environment config
+├── state.py                    # FlowState TypedDict definition
+├── graph.py                    # LangGraph workflow definition
+├── flow_manager.py             # FlowManager class for state operations
+├── validators.py               # Requirement validation logic
+├── logging_config.py           # Logging configuration
+│
+├── api/                        # REST API layer
+│   ├── __init__.py
+│   ├── models.py               # Pydantic request/response models
+│   └── routes.py               # FastAPI route definitions
+│
+├── chains/                     # LangChain chains (LLM interactions)
+│   ├── __init__.py
+│   ├── lead_analyzer.py        # Lead analysis & intent classification
+│   ├── email_writer.py         # Email generation chain
+│   └── pricing_expert.py       # Pricing calculation chain
+│
+├── nodes/                      # LangGraph node functions
+│   ├── __init__.py             # Exports all nodes
+│   ├── ingest.py               # Email ingestion node
+│   ├── understand.py           # Lead understanding node
+│   ├── reply.py                # Reply processing node
+│   ├── feasibility.py          # Feasibility check node
+│   ├── pricing.py              # Pricing calculation node
+│   ├── quote.py                # Quote generation node
+│   ├── clarification.py        # Clarification request node
+│   ├── confirmation.py         # Order confirmation node
+│   ├── order.py                # Order placement node
+│   ├── approval.py             # Approval handling node
+│   ├── rejection.py            # Rejection handling node
+│   └── error_handler.py        # Error handling node (stops flow)
+│
+├── prompts/                    # LLM prompt configurations
+│   ├── __init__.py
+│   ├── agents.yaml             # Agent role definitions
+│   └── tasks.yaml              # Task prompt templates
+│
+├── storage/                    # Data persistence layer
+│   ├── __init__.py
+│   ├── redis_store.py          # Redis state storage
+│   └── rag_storage.py          # RAG document storage
+│
+├── tools/                      # LangChain tools
+│   ├── __init__.py
+│   ├── pricing_tool.py         # Pricing calculation tools
+│   ├── feasibility_tool.py     # Feasibility check tools
+│   ├── order_tool.py           # Order management tools
+│   └── email_tool.py           # Email sending tools
+│
+└── utils/                      # Utility modules
+    ├── __init__.py
+    ├── approval_handler.py     # Approval request management
+    ├── langsmith_helpers.py    # LangSmith tracing utilities
+    └── state_logger.py         # State logging utilities
+```
+
+## Test Structure
+
+```
+tests/
+├── __init__.py
+├── conftest.py                 # Pytest fixtures
+├── unit/                       # Unit tests
+│   ├── __init__.py
+│   ├── test_tools.py           # Tool function tests
+│   └── test_validators.py      # Validator tests
+└── integration/                # Integration tests
+    ├── __init__.py
+    └── test_api.py             # API endpoint tests
+```
+
+## Key Files Reference
+
+### Entry Points
+| File | Purpose |
+|------|---------|
+| `main.py` | FastAPI app initialization, lifespan management |
+| `graph.py` | LangGraph workflow definition with nodes and edges |
+| `flow_manager.py` | State management, graph invocation |
+
+### Configuration
+| File | Purpose |
+|------|---------|
+| `config.py` | Settings class with env vars (Redis, OpenAI, etc.) |
+| `state.py` | `FlowState` TypedDict, enums (`FlowStatus`, `CustomerIntent`) |
+| `validators.py` | Required fields, validation rules |
+
+### LLM Logic
+| File | Purpose |
+|------|---------|
+| `chains/lead_analyzer.py` | `analyze_lead()`, `classify_reply_intent()` |
+| `chains/email_writer.py` | `generate_email()` for all email types |
+| `chains/pricing_expert.py` | `calculate_pricing()` with context |
+
+### Prompt Configuration
+| File | Purpose |
+|------|---------|
+| `prompts/agents.yaml` | Agent roles, goals, backstories |
+| `prompts/tasks.yaml` | Task descriptions, product catalog |
+
+### Storage
+| File | Purpose |
+|------|---------|
+| `storage/redis_store.py` | `RedisStateStore` for lead states |
+| `storage/rag_storage.py` | `RAGStorage` for document retrieval |
+
+## Import Patterns
+
+```python
+# Configuration
+from sasha_sales_ai.config import get_settings
+
+# State
+from sasha_sales_ai.state import FlowState, FlowStatus, CustomerIntent
+
+# Chains
+from sasha_sales_ai.chains.lead_analyzer import analyze_lead, classify_reply_intent
+from sasha_sales_ai.chains.email_writer import generate_email
+
+# Nodes
+from sasha_sales_ai.nodes import understand_lead, process_reply, place_order
+
+# Storage
+from sasha_sales_ai.storage import RedisStateStore, get_redis_store
+
+# Utilities
+from sasha_sales_ai.utils import log_state_before, log_state_after, get_tracing_context
+```

@@ -99,8 +99,7 @@ def check_feasibility(
                 reason=f"Minimum order quantity is {FEASIBILITY_RULES['min_quantity']} units.",
                 alternatives=f"Please consider ordering at least {FEASIBILITY_RULES['min_quantity']} units.",
             ))
-        
-        if quantity > FEASIBILITY_RULES["max_quantity"]:
+        elif quantity > FEASIBILITY_RULES["max_quantity"]:
             return _format_result(FeasibilityResult(
                 is_feasible=False,
                 reason=f"Maximum order quantity is {FEASIBILITY_RULES['max_quantity']} units per order.",

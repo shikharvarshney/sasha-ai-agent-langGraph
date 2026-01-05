@@ -170,10 +170,6 @@ def route_after_reply(
             return "request_clarification"
         # Otherwise proceed to feasibility check with new info
         return "check_feasibility"
-    
-    # For questions or clarifications, respond
-    return "request_clarification"
-
 
 def should_end(state: FlowState) -> bool:
     """Check if the flow should end.

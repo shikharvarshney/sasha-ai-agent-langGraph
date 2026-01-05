@@ -318,9 +318,9 @@ async def delete_lead(
         if not state:
             raise HTTPException(
                 status_code=404,
-                detail=f"Lead {lead_id} not found"
-            )
-        
+            detail=f"Lead {lead_id} not found"
+        )
+    
         # Delete from Redis storage
         deleted = flow_manager.delete_lead(lead_id)
         
@@ -331,4 +331,3 @@ async def delete_lead(
                 status_code=500,
                 detail=f"Failed to delete lead {lead_id}"
             )
-

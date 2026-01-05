@@ -159,6 +159,6 @@ def process_approval_decision(state: FlowState) -> dict[str, Any]:
                 "status": FlowStatus.APPROVAL_PENDING,
                 "current_node": "process_approval_decision",
             }
-        
+
         log_state_after("process_approval_decision", state, result)
         return result

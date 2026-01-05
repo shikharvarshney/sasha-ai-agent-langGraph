@@ -17,7 +17,7 @@ workflow:
   # Email settings
   quote_validity_days: 30
   default_delivery_days: 14
-
+  
 # Node timeout settings  
 nodes:
   ingest_email:

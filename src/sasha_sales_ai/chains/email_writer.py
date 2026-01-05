@@ -252,9 +252,7 @@ def write_clarification_email(
                 for item in missing_info
             )
         else:
-            missing_formatted = "\n".join(f"- {item}" for item in missing_info)
-    else:
-        missing_formatted = str(missing_info)
+         missing_formatted = "\n".join(f"- {item}" for item in missing_info)
     
     result = chain.invoke({
         "customer_name": customer_name or "Valued Customer",

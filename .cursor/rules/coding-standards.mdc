@@ -1,0 +1,497 @@
+---
+description: Mandatory coding standards for all new features and modifications
+globs: src/**/*.py
+alwaysApply: true
+---
+# Coding Standards
+
+These coding standards MUST be followed for ALL new features and code modifications. No exceptions.
+
+## 1. File Structure & Imports
+
+### Import Order (MANDATORY)
+Imports must be organized in this exact order with blank lines between groups:
+
+```python
+"""Module docstring - REQUIRED for every file"""
+
+# 1. Standard library imports
+import json
+import logging
+import re
+from typing import Any, Optional, Literal
+
+# 2. Third-party imports
+from fastapi import APIRouter, HTTPException, Depends
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, START, END
+
+# 3. Local imports (relative)
+from ..state import FlowState, FlowStatus, CustomerIntent
+from ..config import get_settings
+from ..utils.langsmith_helpers import get_tracing_context
+from ..utils.state_logger import log_state_before, log_state_after
+```
+
+### Logger Declaration (MANDATORY)
+Every module MUST declare a logger immediately after imports:
+
+```python
+logger = logging.getLogger("sasha_sales_ai.module_name")
+```
+
+Use the full module path: `sasha_sales_ai.nodes.order`, `sasha_sales_ai.api.routes`, etc.
+
+---
+
+## 2. Node Functions (LangGraph)
+
+### Structure Template (MANDATORY)
+Every node function MUST follow this exact structure:
+
+```python
+def node_name(state: FlowState) -> dict[str, Any]:
+    """Brief description of what this node does.
+    
+    This node:
+    1. First thing it does
+    2. Second thing it does
+    3. Third thing it does
+    
+    Args:
+        state: Current flow state
+    
+    Returns:
+        Updated state fields
+    """
+    lead_id = state.get("lead_id", "unknown")
+    
+    # MANDATORY: Log state before execution
+    log_state_before("node_name", state)
+    
+    with get_tracing_context(
+        name="node_name",
+        tags=["node", "category", lead_id],
+        metadata={"lead_id": lead_id},
+    ):
+        logger.info(f"Processing node_name for lead {lead_id}")
+        
+        try:
+            # === NODE LOGIC HERE ===
+            
+            result = {
+                "field": "value",
+                "status": FlowStatus.SOME_STATUS,
+                "current_node": "node_name",
+            }
+            
+            # MANDATORY: Log state after execution
+            log_state_after("node_name", state, result)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in node_name for {lead_id}: {e}")
+            result = {
+                "status": FlowStatus.ERROR,
+                "error_message": str(e),
+                "error_node": "node_name",
+            }
+            log_state_after("node_name", state, result)
+            return result
+```
+
+### Node Rules
+1. **ALWAYS** use `state.get("field", default)` - never direct access
+2. **ALWAYS** include `log_state_before()` and `log_state_after()`
+3. **ALWAYS** wrap logic in `get_tracing_context()`
+4. **ALWAYS** catch exceptions and return `FlowStatus.ERROR`
+5. **ALWAYS** include `error_node` in error returns
+6. **ALWAYS** set `current_node` in successful returns
+7. **NEVER** mutate state directly - return new values only
+
+---
+
+## 3. API Endpoints (FastAPI)
+
+### Structure Template (MANDATORY)
+
+```python
+@router.post("/endpoint", response_model=ResponseModel)
+async def endpoint_name(
+    request: RequestModel,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+) -> ResponseModel:
+    """Brief description.
+    
+    Detailed description of what this endpoint does.
+    """
+    with get_tracing_context(
+        name="endpoint_name",
+        tags=["api", "category"],
+        metadata={"key": request.some_field},
+    ):
+        logger.info(f"Processing request: {request.some_field}")
+        
+        try:
+            # === ENDPOINT LOGIC ===
+            
+            return ResponseModel(
+                field="value",
+                status="success",
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in endpoint_name: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+```
+
+### Endpoint Rules
+1. **ALWAYS** use dependency injection for FlowManager
+2. **ALWAYS** wrap in `get_tracing_context()`
+3. **ALWAYS** use Pydantic models for request/response
+4. **ALWAYS** log the incoming request
+5. **NEVER** return raw exceptions to client
+
+---
+
+## 4. Routing Functions (LangGraph)
+
+### Structure Template (MANDATORY)
+
+```python
+def route_after_something(
+    state: FlowState,
+) -> Literal["node_a", "node_b", "node_c"]:
+    """Route description.
+    
+    Determines next step based on:
+    - Condition 1
+    - Condition 2
+    
+    Args:
+        state: Current flow state
+    
+    Returns:
+        Next node name
+    """
+    status = state.get("status", "")
+    some_flag = state.get("some_flag", False)
+    
+    # CRITICAL: Always check for ERROR first
+    if status == FlowStatus.ERROR:
+        logger.error("Error detected - routing to error handler")
+        return "handle_error"
+    
+    # Route based on conditions
+    if some_flag:
+        return "node_a"
+    
+    return "node_b"
+```
+
+### Routing Rules
+1. **ALWAYS** check `FlowStatus.ERROR` first
+2. **ALWAYS** use `Literal` type hint for return
+3. **NEVER** have side effects in routing functions
+4. **ALWAYS** have a default fallback return
+
+---
+
+## 5. Tools (LangChain)
+
+### Structure Template (MANDATORY)
+
+```python
+@tool
+def tool_name(
+    required_param: str,
+    optional_param: Optional[int] = None,
+) -> str:
+    """Tool description for LLM.
+    
+    Args:
+        required_param: Description of required param
+        optional_param: Description of optional param
+    
+    Returns:
+        JSON string with result
+    """
+    import json
+    
+    logger.info(f"Tool invoked: {required_param}, {optional_param}")
+    
+    try:
+        # === TOOL LOGIC ===
+        
+        result = {
+            "field": "value",
+            "success": True,
+        }
+        return json.dumps(result)
+        
+    except Exception as e:
+        logger.error(f"Tool error: {e}")
+        return json.dumps({"error": str(e), "success": False})
+```
+
+### Tool Rules
+1. **ALWAYS** return JSON strings (for LLM parsing)
+2. **ALWAYS** include success/error indicator
+3. **ALWAYS** log tool invocations
+4. **NEVER** raise exceptions - return error in JSON
+
+---
+
+## 6. Error Handling
+
+### Mandatory Patterns
+
+```python
+# In nodes - ALWAYS catch and return error status
+try:
+    # logic
+except Exception as e:
+    logger.error(f"Error description: {e}")
+    return {
+        "status": FlowStatus.ERROR,
+        "error_message": str(e),
+        "error_node": "node_name",
+    }
+
+# In API endpoints - ALWAYS raise HTTPException
+try:
+    # logic
+except Exception as e:
+    logger.error(f"Error description: {e}")
+    raise HTTPException(status_code=500, detail=str(e))
+
+# In tools - ALWAYS return error JSON
+try:
+    # logic
+except Exception as e:
+    logger.error(f"Tool error: {e}")
+    return json.dumps({"error": str(e), "success": False})
+```
+
+### Error Rules
+1. **NEVER** send emails when status is ERROR
+2. **NEVER** proceed with incomplete data
+3. **ALWAYS** log errors with context
+4. **ALWAYS** include the source node/function in error
+
+---
+
+## 7. State Management
+
+### Accessing State (MANDATORY)
+
+```python
+# CORRECT - Always use .get() with defaults
+lead_id = state.get("lead_id", "unknown")
+requirements = state.get("requirements", {})
+missing_fields = state.get("missing_fields", [])
+total_amount = state.get("total_amount", 0)
+is_feasible = state.get("is_feasible", False)
+
+# WRONG - Never access directly
+lead_id = state["lead_id"]  # FORBIDDEN
+```
+
+### Handling Nested Requirements
+
+```python
+# Requirements may have nested structure from LLM
+requirements = state.get("requirements", {})
+nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
+
+# Check both levels
+product_type = requirements.get("product_type") or nested_req.get("product_type") or "default"
+quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+```
+
+### Returning State Updates
+
+```python
+# CORRECT - Return only changed fields
+return {
+    "status": FlowStatus.QUOTED,
+    "total_amount": 1500.00,
+    "current_node": "generate_quote",
+}
+
+# WRONG - Never return entire state
+return state  # FORBIDDEN
+```
+
+---
+
+## 8. Logging Standards
+
+### Log Levels
+
+```python
+# DEBUG - Detailed debugging info (state values, intermediate results)
+logger.debug(f"Processing item: {item}")
+
+# INFO - Normal operations (start/end of operations, key events)
+logger.info(f"Processing lead {lead_id}")
+logger.info(f"Order placed: {order_id}")
+
+# WARNING - Unexpected but handled situations
+logger.warning(f"Missing optional field: {field}")
+
+# ERROR - Failures that need attention
+logger.error(f"Error placing order for {lead_id}: {e}")
+```
+
+### Email Logging (MANDATORY)
+
+```python
+from ..utils.state_logger import log_incoming_email, log_outgoing_email
+
+# Log incoming emails
+log_incoming_email(email_from, email_subject, email_body)
+
+# Log outgoing emails
+log_outgoing_email(email_to, email_subject, email_body)
+```
+
+---
+
+## 9. Type Hints (MANDATORY)
+
+### Function Signatures
+
+```python
+# CORRECT - Full type hints
+def process_data(
+    lead_id: str,
+    requirements: dict[str, Any],
+    quantity: Optional[int] = None,
+) -> dict[str, Any]:
+
+# WRONG - Missing type hints
+def process_data(lead_id, requirements, quantity=None):  # FORBIDDEN
+```
+
+### Use Specific Types When Possible
+
+```python
+# Prefer specific types
+def route_something(state: FlowState) -> Literal["node_a", "node_b"]:
+
+# Use Optional for nullable
+def get_value(key: str) -> Optional[str]:
+
+# Use Union for multiple types
+def parse_value(value: str | int) -> float:
+```
+
+---
+
+## 10. Configuration Access
+
+### Always Use Settings
+
+```python
+from ..config import get_settings
+
+def some_function():
+    settings = get_settings()
+    
+    # Access configuration
+    threshold = settings.approval_threshold
+    model = settings.model_name
+    redis_url = settings.redis_url
+```
+
+### Never Hardcode
+
+```python
+# WRONG
+threshold = 10000.0  # FORBIDDEN - use settings
+
+# CORRECT
+settings = get_settings()
+threshold = settings.approval_threshold
+```
+
+---
+
+## 11. Constants & Enums
+
+### Use Enums for Status/Intent
+
+```python
+from ..state import FlowStatus, CustomerIntent
+
+# CORRECT
+status = FlowStatus.QUOTED
+intent = CustomerIntent.CONFIRM_ORDER
+
+# WRONG
+status = "quoted"  # FORBIDDEN - use enum
+```
+
+### Define Constants at Module Level
+
+```python
+# At top of file, after imports
+VALID_PRODUCT_TYPES = ["t-shirt", "polo", "hoodie", "cap", "mug", "tote bag", "jacket"]
+MAX_QUANTITY = 10000
+DEFAULT_TIMELINE_DAYS = 14
+```
+
+---
+
+## 12. Documentation
+
+### Module Docstring (MANDATORY)
+
+```python
+"""Brief description of module purpose.
+
+Longer description if needed explaining:
+- What this module provides
+- How it fits in the system
+- Any important notes
+"""
+```
+
+### Function Docstring (MANDATORY for public functions)
+
+```python
+def function_name(param: str) -> dict[str, Any]:
+    """Brief one-line description.
+    
+    Longer description if needed.
+    
+    Args:
+        param: Description of parameter
+    
+    Returns:
+        Description of return value
+    
+    Raises:
+        ValueError: When param is invalid
+    """
+```
+
+---
+
+## Checklist for Code Review
+
+Before submitting any code, verify:
+
+- [ ] Module has docstring
+- [ ] Logger declared with full module path
+- [ ] Imports organized correctly
+- [ ] All functions have type hints
+- [ ] All public functions have docstrings
+- [ ] State accessed with `.get()` and defaults
+- [ ] `log_state_before()` and `log_state_after()` in nodes
+- [ ] `get_tracing_context()` wrapping main logic
+- [ ] Exceptions caught and handled appropriately
+- [ ] No hardcoded values - using settings/constants
+- [ ] Using enums for status/intent values
+- [ ] No state mutation - only returning new values
