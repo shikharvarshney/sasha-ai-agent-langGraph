@@ -170,16 +170,44 @@ A curated set of **power-user tips, workflows, and security practices** for usin
 - Add Markdown files under a `commands/` directory.
 - Commands appear when typing `/` in Cursor.
 - Example use cases:
-  - `/create-pr`
-  - `/refactor-module`
+  - `/do-code-review`
   - `/write-tests`
+  - `/develop`
 - Enables repeatable, opinionated workflows.
+- A great example of a simple command wheneever you trying to develop/refactor something in the code base could be as below. This will simply ensure that 
+coding standards are read through by cursor before coding and devs/designers have to only develop a habbit of typing `/develop` before building anything.
+However, this does not deny the need of Code Reviews. They are still primary. 
+- In some other optimisation strategy you can always make a command to instruct AI to do the PR Review of their own code. It has been proven that re-iterating 
+an AI to force into feedback loop often improves the result.
+
+`# You are helping develop a new feature.
+
+IMPORTANT:
+- Before responding, ensure that `@coding-standards.mdc` is included in context.
+- If it is not present, ask the user to attach it before continuing.
+
+CODING STANDARDS (MANDATORY):
+- Follow existing project structure and naming conventions
+- Do not introduce new architectural patterns without explanation
+- Prefer explicit, readable code over clever abstractions
+- Write code that is testable and maintainable
+
+SECURITY (MANDATORY):
+- Never hardcode secrets or credentials
+- Assume secrets are managed externally
+- Do not modify auth, permissions, or infra unless explicitly requested
+
+BEHAVIOR:
+- Ask clarifying questions if requirements are ambiguous
+- Stop and ask if a request conflicts with these constraints
+
+Now implement the following feature:`
 
 ---
 
-### 4. *** Duplicate Chats to Explore Alternatives ***
-- Clone an existing conversation to try different approaches.
-- Useful for comparing refactors or design decisions.
+### 4. *** Code Review by AI builds a feedback loop to improve on its own code as a first line of defence ***
+- use `/do-code-review` @diff or `/do-code-review` @branch commands every time you code something.
+- refer the command instructions from the commands in the repo.
 
 ---
 
@@ -337,6 +365,12 @@ Define **project-specific AI rules** using:
 - Guides Cursor toward **secure, consistent behavior**
 - Encodes architectural and security constraints directly into AI usage
 
+### Rules are:-
+- Rules are best-effort
+- Determinism is not guaranteed
+- Repetition + proximity to the prompt increases compliance
+- Developer ergonomics matter more than theoretical purity
+
 Refer these rules as an example:- https://github.com/PatrickJS/awesome-cursorrules/tree/main/rules-new
 
 ---
@@ -360,48 +394,11 @@ Cursor rules act as an **AI policy enforcement layer**, similar to:
 - Security policies
 - Architecture decision records (ADRs)
 
-**User rules** have a higher and more consistent chance of being applied than project rules in every chat.
-
 Cursor (like most AI coding tools) resolves instructions roughly in this order:
-
 - System instructions (Cursor internal)
-- User rules (global, always-on)
-- Project rules (.cursor/rules/*.mdc)
+- Rules (user --> project) -- But this is not 100% picked up everytime by cursor.
 - Chat prompt / instructions
 - Implicit inference
-
-
-## 18. How to Define User Rules (This has to be put in each developer's cursor based user rules)
-
---- # Global Cursor Behavior Rule
-
-You MUST do the following in **every chat, without exception**:
-
-1. **Before generating any response**, explicitly load and follow all rules defined in: .cursor/rules/*.mdc
-
-2. Treat project rules as **authoritative and mandatory**, not advisory.
-- If there is ambiguity, ask for clarification.
-- If there is a conflict, prioritize **security and safety rules**.
-
-3. **Never ignore, summarize away, or partially apply rules** due to:
-- Context length
-- Time pressure
-- Assumed intent
-
-4. **Do not generate code, commands, or file changes** that violate:
-- Security rules
-- Secret-handling rules
-- Input validation rules
-- Architectural constraints
-
-5. If a user request conflicts with project rules:
-- Explicitly point out the conflict
-- Refuse to proceed until resolved
-
-6. Assume this rule is **higher priority than chat-level instructions** and applies globally.
-
-Acknowledge these constraints implicitly by complying with them.
-Do NOT restate them unless asked.
 
 ---
 
