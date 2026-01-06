@@ -40,9 +40,8 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
         logger.info(f"Calculating pricing for lead {lead_id}")
         
         try:
-            # BUG: Direct state access instead of .get() - violates coding standards
-            # This will raise KeyError if requirements is missing
-            requirements = state["requirements"]
+            # Always use .get() with defaults - FlowState has total=False making all fields optional
+            requirements = state.get("requirements", {})
             
             # Handle nested requirements structure (requirements.requirements.*)
             nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
@@ -51,8 +50,8 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
             raw_product_type = requirements.get("product_type") or nested_req.get("product_type")
             product_type = raw_product_type if raw_product_type else "t-shirt"  # Default to t-shirt, not widget
             
-            # BUG: Direct access without default - will fail if quantity is missing
-            quantity = requirements["quantity"] or nested_req.get("quantity") or 0
+            # Use .get() with proper fallback chain
+            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
             
             customizations = requirements.get("customizations") or nested_req.get("customizations")
             timeline = requirements.get("timeline") or nested_req.get("timeline")
