@@ -413,6 +413,11 @@ Cursor (like most AI coding tools) resolves instructions roughly in this order:
 - you can now swithc the branches by using the Laptop icon beneath the chat window and select `worktree` and then choosing branch.
 - this will help you to immediately change context to provide any hotfixes in the main branch even if you are working on some feature branch.
 
+## 20. Use Cursor BugBot
+- in your system to identify any breaking changes 
+- any security vulnerabilities and allow and automatic PR review by the Agent
+- you should be able to fix the bug right there from Github
+
 ---
 
 # Cursor Do & Don’t — Quick Reference for Engineers
