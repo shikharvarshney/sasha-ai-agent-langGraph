@@ -40,7 +40,9 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
         logger.info(f"Calculating pricing for lead {lead_id}")
         
         try:
-            requirements = state.get("requirements", {})
+            # BUG: Direct state access instead of .get() - violates coding standards
+            # This will raise KeyError if requirements is missing
+            requirements = state["requirements"]
             
             # Handle nested requirements structure (requirements.requirements.*)
             nested_req = requirements.get("requirements", {}) if isinstance(requirements.get("requirements"), dict) else {}
@@ -49,8 +51,8 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
             raw_product_type = requirements.get("product_type") or nested_req.get("product_type")
             product_type = raw_product_type if raw_product_type else "t-shirt"  # Default to t-shirt, not widget
             
-            # Get quantity - check both top-level and nested
-            quantity = requirements.get("quantity") or nested_req.get("quantity") or 0
+            # BUG: Direct access without default - will fail if quantity is missing
+            quantity = requirements["quantity"] or nested_req.get("quantity") or 0
             
             customizations = requirements.get("customizations") or nested_req.get("customizations")
             timeline = requirements.get("timeline") or nested_req.get("timeline")
@@ -111,11 +113,13 @@ def calculate_pricing(state: FlowState) -> dict[str, Any]:
             logger.info(f"Pricing breakdown for {lead_id}:\n{pricing_breakdown}")
             
             # Generate explanation
+            # BUG: Hardcoded default timeline instead of using settings/constants
+            # Should use DEFAULT_TIMELINE_DAYS constant or config setting
             explanation_result = generate_pricing_explanation(
                 product_type=product_type,
                 quantity=quantity,
                 customizations=customizations or "None",
-                timeline_days=timeline_days or 14,
+                timeline_days=timeline_days or 14,  # Hardcoded - violates coding standards
                 pricing_breakdown=pricing_breakdown,
                 total_amount=total_amount,
             )
