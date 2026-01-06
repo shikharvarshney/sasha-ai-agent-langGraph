@@ -182,8 +182,10 @@ However, this does not deny the need of Code Reviews. They are still primary.
 - In some other optimisation strategy you can always make a command to instruct AI to do the PR Review of their own code. It has been proven that re-iterating 
 an AI to force into feedback loop often improves the result.
 
-An example for `/develop` command 
-` You are helping develop a new feature
+An example for `/develop` command :- 
+
+---
+`You are helping develop a new feature
 
 IMPORTANT:
 - Before responding, ensure that `@coding-standards.mdc` is included in context.
