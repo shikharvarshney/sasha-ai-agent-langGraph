@@ -147,13 +147,15 @@ A curated set of **power-user tips, workflows, and security practices** for usin
 
 ## 🧠 Cursor PRO Productivity Tips
 
-### 1. *** Use Plan Mode Before Coding ***
+### 1. *** Use Plan Mode Before Coding and ASK Mode for clarifying something ***
 - Start a new chat (`Cmd + N`) and switch to **Plan Mode** (`Shift + Tab`).
 - Let Cursor analyze the codebase and generate:
   - File changes
   - Step-by-step execution plan
   - Architectural suggestions
 - Review and edit the plan before running Build.
+- Ask mode to get knowledge. 
+- Only use Agent mode when you want to perform a task after asking and planning.
 
 ---
 
@@ -180,6 +182,7 @@ However, this does not deny the need of Code Reviews. They are still primary.
 - In some other optimisation strategy you can always make a command to instruct AI to do the PR Review of their own code. It has been proven that re-iterating 
 an AI to force into feedback loop often improves the result.
 
+An example for `/develop` command 
 ` You are helping develop a new feature
 
 IMPORTANT:
